@@ -1,7 +1,7 @@
 import { useState } from "react";
 import api from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { PRIORITIES, canEdit, errorMessage, isDone, projectPeople, sortedColumns } from "@/lib/format";
+import { CONFLICT_TOAST, PRIORITIES, canEdit, canManageTasks, canWorkOnTask, conflictFrom, errorMessage, isDone, projectPeople, sortedColumns } from "@/lib/format";
 import { useProject } from "@/lib/projectContext";
 import type { Priority, Task } from "@/lib/types";
 import { useFetch } from "@/lib/useFetch";
@@ -13,6 +13,7 @@ export default function Board() {
   const { project } = useProject();
   const { user } = useAuth();
   const editable = canEdit(user);
+  const manage = canManageTasks(project, user);
   const toast = useToast();
   const cols = sortedColumns(project);
   const { data: tasks, error, reload, setData } = useFetch(() => api.get<Task[]>(`/projects/${project._id}/tasks`).then((r) => r.data), [project._id]);
@@ -33,7 +34,7 @@ export default function Board() {
 
   async function move(taskId: string, columnId: string, beforeId?: string) {
     const task = tasks!.find((t) => t._id === taskId);
-    if (!editable || !task || (task._id === beforeId)) return;
+    if (!task || !canWorkOnTask(project, user, task) || (task._id === beforeId)) return;
     const siblings = tasks!.filter((t) => t.columnId === columnId && t._id !== taskId).sort((a, b) => a.order - b.order);
     let order: number;
     const idx = beforeId ? siblings.findIndex((t) => t._id === beforeId) : -1;
@@ -42,10 +43,17 @@ export default function Board() {
     const prev = tasks;
     setData((list) => (list ?? []).map((t) => (t._id === taskId ? { ...t, columnId, order } : t)));
     try {
-      await api.put(`/projects/${project._id}/tasks/${taskId}/move`, { columnId, order });
+      const { data: saved } = await api.put<Task>(`/projects/${project._id}/tasks/${taskId}/move`, { columnId, order, version: task.version });
+      // Remember the new version so the next drag of this card isn't mistaken for a stale one.
+      setData((list) => (list ?? []).map((t) => (t._id === taskId ? { ...t, version: saved.version } : t)));
     } catch (err) {
       setData(() => prev);
-      toast(errorMessage(err), "error");
+      if (conflictFrom(err)) {
+        toast(CONFLICT_TOAST, "error");
+        reload();
+      } else {
+        toast(errorMessage(err), "error");
+      }
     }
   }
 
@@ -78,7 +86,7 @@ export default function Board() {
           {PRIORITIES.map((p) => <option key={p} value={p}>{p}</option>)}
         </Select>
         {(assignee || priority) && <Button size="sm" variant="ghost" onClick={() => { setAssignee(""); setPriority(""); }}>Clear filters</Button>}
-        {editable && <Button variant="primary" size="sm" className="ml-auto" onClick={() => setCreatingIn(cols[0]?.id ?? "")}>New task</Button>}
+        {manage && <Button variant="primary" size="sm" className="ml-auto" onClick={() => setCreatingIn(cols[0]?.id ?? "")}>New task</Button>}
       </div>
 
       <div className="-mx-4 overflow-x-auto px-4 pb-4 sm:-mx-8 sm:px-8">
@@ -106,7 +114,7 @@ export default function Board() {
                     {c.name}
                     <span className="text-sm font-normal text-muted">{total}</span>
                   </h2>
-                  {editable && <button type="button" aria-label={`Add task to ${c.name}`} onClick={() => setQuick({ col: c.id, title: "" })} className="grid size-7 place-items-center rounded-lg text-muted hover:bg-surface hover:text-ink">
+                  {manage && <button type="button" aria-label={`Add task to ${c.name}`} onClick={() => setQuick({ col: c.id, title: "" })} className="grid size-7 place-items-center rounded-lg text-muted hover:bg-surface hover:text-ink">
                     <svg viewBox="0 0 20 20" className="size-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M10 4v12M4 10h12" /></svg>
                   </button>}
                 </header>
@@ -132,14 +140,14 @@ export default function Board() {
                         task={t}
                         done={isDone(t, project)}
                         dragging={dragId === t._id}
-                        readOnly={!editable}
+                        readOnly={!canWorkOnTask(project, user, t)}
                         onDragStart={(e) => { setDragId(t._id); e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", t._id); }}
                         onDragEnd={() => { setDragId(null); setOverCol(null); }}
                       />
                     </div>
                   ))}
                   {list.length === 0 && !quick && (
-                    <p className="px-2 py-6 text-center text-sm text-faint">{total ? "No tasks match the filters" : editable ? "Drop tasks here" : "No tasks"}</p>
+                    <p className="px-2 py-6 text-center text-sm text-faint">{total ? "No tasks match the filters" : manage ? "Drop tasks here" : "No tasks"}</p>
                   )}
                 </div>
               </section>

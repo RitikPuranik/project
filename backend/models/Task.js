@@ -42,6 +42,10 @@ const taskSchema = new mongoose.Schema(
     comments: [commentSchema],
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
     isDeleted: { type: Boolean, default: false },
+    // Optimistic-concurrency token. Clients send the version they last saw; a write only
+    // succeeds if it still matches, and every successful write increments it by one.
+    // (Comments and newly added subtasks are append-only and do not bump it.)
+    version: { type: Number, default: 0, min: 0 },
   },
   { timestamps: true }
 );

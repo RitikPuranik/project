@@ -1,11 +1,15 @@
+import mongoose from "mongoose";
 import Project from "../models/Project.js";
 import Task from "../models/Task.js";
+import User from "../models/User.js";
+import { getProjectRole } from "../middleware/access.js";
 
-const isProjectManagerOrOwner = (project, userId) => {
-  if (project.owner.toString() === userId.toString()) return true;
-  const member = project.members.find((m) => m.user.toString() === userId.toString());
-  return member && member.role === "project_manager";
-};
+// Admin, or a project manager of *this* project (owner / assigned PM who also holds the
+// global Project Manager role). Same rule the task controller uses via req.projectRole.
+const canManageProject = (user, project) =>
+  ["admin", "project_manager"].includes(getProjectRole(user, project));
+
+const forbidden = (res, message) => res.status(403).json({ message });
 
 // @route POST /api/projects
 export const createProject = async (req, res) => {
@@ -13,7 +17,18 @@ export const createProject = async (req, res) => {
     const { name, description, startDate, endDate, memberIds } = req.body;
     if (!name) return res.status(400).json({ message: "Project name is required" });
 
-    const members = (memberIds || []).map((id) => ({ user: id, role: "member" }));
+    // Only real, distinct users (never the owner) can be added as members.
+    const requested = [...new Set((Array.isArray(memberIds) ? memberIds : []).map(String))].filter(
+      (id) => id !== req.user._id.toString()
+    );
+    if (requested.some((id) => !mongoose.isValidObjectId(id))) {
+      return res.status(400).json({ message: "memberIds must be valid user ids" });
+    }
+    const found = await User.find({ _id: { $in: requested } }).select("_id");
+    if (found.length !== requested.length) {
+      return res.status(400).json({ message: "One or more members do not exist" });
+    }
+    const members = requested.map((id) => ({ user: id, role: "member" }));
 
     const project = await Project.create({
       name,
@@ -71,8 +86,8 @@ export const updateProject = async (req, res) => {
     const project = await Project.findById(req.params.id);
     if (!project || project.isDeleted) return res.status(404).json({ message: "Project not found" });
 
-    if (req.user.role !== "admin" && !isProjectManagerOrOwner(project, req.user._id)) {
-      return res.status(403).json({ message: "Only the owner or a project manager can edit this project" });
+    if (!canManageProject(req.user, project)) {
+      return forbidden(res, "Only the owner or a project manager can edit this project");
     }
 
     const { name, description, startDate, endDate, columns } = req.body;
@@ -95,8 +110,9 @@ export const deleteProject = async (req, res) => {
     const project = await Project.findById(req.params.id);
     if (!project || project.isDeleted) return res.status(404).json({ message: "Project not found" });
 
-    if (req.user.role !== "admin" && project.owner.toString() !== req.user._id.toString()) {
-      return res.status(403).json({ message: "Only the owner or an admin can delete this project" });
+    const isOwner = project.owner.toString() === req.user._id.toString();
+    if (!(req.user.role === "admin" || (isOwner && canManageProject(req.user, project)))) {
+      return forbidden(res, "Only the owner or an admin can delete this project");
     }
 
     project.isDeleted = true;
@@ -113,8 +129,8 @@ export const archiveProject = async (req, res) => {
     const project = await Project.findById(req.params.id);
     if (!project || project.isDeleted) return res.status(404).json({ message: "Project not found" });
 
-    if (req.user.role !== "admin" && !isProjectManagerOrOwner(project, req.user._id)) {
-      return res.status(403).json({ message: "Not authorized to archive this project" });
+    if (!canManageProject(req.user, project)) {
+      return forbidden(res, "Not authorized to archive this project");
     }
 
     project.isArchived = !project.isArchived;
@@ -130,6 +146,10 @@ export const cloneProject = async (req, res) => {
   try {
     const original = await Project.findById(req.params.id);
     if (!original || original.isDeleted) return res.status(404).json({ message: "Project not found" });
+
+    if (!canManageProject(req.user, original)) {
+      return forbidden(res, "Only an admin or a manager of this project can clone it");
+    }
 
     const clone = await Project.create({
       name: `${original.name} (Copy)`,
@@ -172,16 +192,29 @@ export const addMember = async (req, res) => {
     const project = await Project.findById(req.params.id);
     if (!project || project.isDeleted) return res.status(404).json({ message: "Project not found" });
 
-    if (req.user.role !== "admin" && !isProjectManagerOrOwner(project, req.user._id)) {
-      return res.status(403).json({ message: "Not authorized to manage members" });
+    if (!canManageProject(req.user, project)) {
+      return forbidden(res, "Not authorized to manage members");
     }
 
-    if (project.members.some((m) => m.user.toString() === userId)) {
+    if (!mongoose.isValidObjectId(userId)) {
+      return res.status(400).json({ message: "A valid userId is required" });
+    }
+    if (
+      project.owner.toString() === String(userId) ||
+      project.members.some((m) => m.user.toString() === String(userId))
+    ) {
       return res.status(400).json({ message: "User is already a member" });
     }
 
     const targetUser = await User.findById(userId);
     if (!targetUser) return res.status(404).json({ message: "User not found" });
+
+    // Project-level manager status never grants more than the user's global role allows.
+    if (role === "project_manager" && !["admin", "project_manager"].includes(targetUser.role)) {
+      return res
+        .status(400)
+        .json({ message: "Only users with the Project Manager role can be made project managers" });
+    }
 
     // Project Manager can choose a Viewer to become a Member
     if (targetUser.role === "viewer") {
@@ -203,8 +236,8 @@ export const removeMember = async (req, res) => {
     const project = await Project.findById(req.params.id);
     if (!project || project.isDeleted) return res.status(404).json({ message: "Project not found" });
 
-    if (req.user.role !== "admin" && !isProjectManagerOrOwner(project, req.user._id)) {
-      return res.status(403).json({ message: "Not authorized to manage members" });
+    if (!canManageProject(req.user, project)) {
+      return forbidden(res, "Not authorized to manage members");
     }
 
     project.members = project.members.filter((m) => m.user.toString() !== req.params.userId);

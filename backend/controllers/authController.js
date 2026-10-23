@@ -5,7 +5,9 @@ import { generateAccessToken, generateRefreshToken } from "../utils/generateToke
 // @route POST /api/auth/register
 export const register = async (req, res) => {
   try {
-    const { name, email, password, role } = req.body;
+    // NOTE: any `role` sent by the client is deliberately ignored. Roles above "viewer"
+    // are only granted by an admin via PUT /api/users/:id/role.
+    const { name, email, password } = req.body;
 
     if (!name || !email || !password) {
       return res.status(400).json({ message: "Name, email and password are required" });

@@ -8,8 +8,10 @@ type Cell = boolean | string;
 // Mirrors what the API enforces (see backend routes + middleware).
 const ROWS: { label: string; values: Record<Role, Cell> }[] = [
   { label: "View projects and tasks", values: { admin: "All projects", project_manager: "Own projects", member: "Own projects", viewer: "Own projects" } },
-  { label: "Create and edit tasks, change status, assign", values: { admin: true, project_manager: true, member: true, viewer: false } },
-  { label: "Comment on tasks", values: { admin: true, project_manager: true, member: true, viewer: false } },
+  { label: "Create, assign and delete tasks", values: { admin: true, project_manager: "Own projects", member: false, viewer: false } },
+  { label: "Edit task details", values: { admin: true, project_manager: "Own projects", member: "Assigned to you, limited fields", viewer: false } },
+  { label: "Change task status and subtasks", values: { admin: true, project_manager: "Own projects", member: "Assigned to you", viewer: false } },
+  { label: "Comment on tasks", values: { admin: true, project_manager: true, member: "Own projects", viewer: false } },
   { label: "Create projects", values: { admin: true, project_manager: true, member: false, viewer: false } },
   { label: "Edit, archive and manage project teams", values: { admin: true, project_manager: "Own projects", member: false, viewer: false } },
   { label: "Delete projects", values: { admin: true, project_manager: "Own projects", member: false, viewer: false } },

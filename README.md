@@ -211,3 +211,17 @@ project/
 - **`.gitignore`**: Configured in both backend and frontend roots to ensure `.env` files and secrets are never committed to version control.
 - **`.env.example`**: Clear templates provided in both `backend` and `frontend` with all required variables.
 - **Zero Hardcoded URLs**: API calls use `import.meta.env.VITE_API_URL` falling back to `/api` proxy in dev, and automatic token refresh via Axios interceptors in `frontend/src/lib/api.ts`.
+
+---
+
+## 🔄 Concurrent edits (optimistic concurrency)
+
+Every task has a `version` number (starts at `0`, +1 on each successful change).
+
+- Clients send the version they loaded with every **update, move, subtask toggle** (`body.version`) and **delete** (`?version=N`).
+- The server applies the change with a single conditional `findOneAndUpdate({ _id, version })`, so two people saving from the same version can never both succeed — the loser gets **`409 Conflict`** with `{ code: "VERSION_CONFLICT", currentVersion, task }` (the latest task).
+- A missing/invalid version is rejected with **`428 Precondition Required`**; editing a task someone deleted meanwhile returns `404`.
+- Comments and *adding* a subtask are append-only atomic `$push` operations: they never conflict with edits and don't change the version.
+- The edit form sends only the fields you changed. On a 409 it shows what the other person changed and lets you **load the latest version** or **keep your edits** (merged onto the latest) before saving again.
+
+Tests: `cd backend && npm test` (roles + concurrency, no MongoDB needed). Browser test of the conflict UI: `frontend/e2e/conflict.e2e.mjs`.

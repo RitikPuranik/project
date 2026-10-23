@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import api from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { PRIORITIES, canEdit, dueLabel, errorMessage, isDone, projectPeople, sortedColumns } from "@/lib/format";
+import { CONFLICT_TOAST, PRIORITIES, canEdit, canManageTasks, canWorkOnTask, conflictFrom, dueLabel, errorMessage, isDone, projectPeople, sortedColumns } from "@/lib/format";
 import { useProject } from "@/lib/projectContext";
 import type { Priority, Task } from "@/lib/types";
 import { useFetch } from "@/lib/useFetch";
@@ -13,6 +13,7 @@ export default function ProjectTasks() {
   const { project } = useProject();
   const { user } = useAuth();
   const editable = canEdit(user);
+  const manage = canManageTasks(project, user);
   const toast = useToast();
   const cols = sortedColumns(project);
   const { data: tasks, error, reload, setData } = useFetch(() => api.get<Task[]>(`/projects/${project._id}/tasks`).then((r) => r.data), [project._id]);
@@ -40,10 +41,16 @@ export default function ProjectTasks() {
     const order = Math.max(-1, ...tasks!.filter((t) => t.columnId === columnId).map((t) => t.order)) + 1;
     setData((l) => (l ?? []).map((t) => (t._id === task._id ? { ...t, columnId, order } : t)));
     try {
-      await api.put(`/projects/${project._id}/tasks/${task._id}/move`, { columnId, order });
+      const { data: saved } = await api.put<Task>(`/projects/${project._id}/tasks/${task._id}/move`, { columnId, order, version: task.version });
+      setData((l) => (l ?? []).map((t) => (t._id === task._id ? { ...t, version: saved.version } : t)));
     } catch (err) {
       setData(() => prev);
-      toast(errorMessage(err), "error");
+      if (conflictFrom(err)) {
+        toast(CONFLICT_TOAST, "error");
+        reload();
+      } else {
+        toast(errorMessage(err), "error");
+      }
     }
   }
 
@@ -64,14 +71,14 @@ export default function ProjectTasks() {
           <option value="">All assignees</option>
           {projectPeople(project).map((p) => <option key={p._id} value={p._id}>{p.name}</option>)}
         </Select>
-        {editable && <Button variant="primary" size="sm" className="ml-auto" onClick={() => setCreating(true)}>New task</Button>}
+        {manage && <Button variant="primary" size="sm" className="ml-auto" onClick={() => setCreating(true)}>New task</Button>}
       </div>
 
       {rows.length === 0 ? (
         <EmptyState
           title={tasks.length ? "No tasks match" : "No tasks yet"}
-          body={tasks.length ? "Adjust the filters to see more." : editable ? "Add the first task to get this project moving." : "Tasks will appear here once the team adds them."}
-          action={!tasks.length && editable ? <Button variant="primary" onClick={() => setCreating(true)}>New task</Button> : undefined}
+          body={tasks.length ? "Adjust the filters to see more." : manage ? "Add the first task to get this project moving." : "Tasks will appear here once the team adds them."}
+          action={!tasks.length && manage ? <Button variant="primary" onClick={() => setCreating(true)}>New task</Button> : undefined}
         />
       ) : (
         <div className="overflow-x-auto rounded-2xl border border-line bg-surface">
@@ -96,7 +103,7 @@ export default function ProjectTasks() {
                       <Link to={`/tasks/${t._id}`} className={cx("font-medium hover:text-accent-strong", isDone(t, project) && "text-muted line-through")}>{t.title}</Link>
                     </td>
                     <td className="px-3 py-2.5">
-                      {!editable ? <span>{cols.find((c) => c.id === t.columnId)?.name}</span> : <Select aria-label={`Status for ${t.title}`} value={t.columnId} onChange={(e) => changeStatus(t, e.target.value)} className="h-8 w-auto min-w-32 text-[13px]">
+                      {!canWorkOnTask(project, user, t) ? <span>{cols.find((c) => c.id === t.columnId)?.name}</span> : <Select aria-label={`Status for ${t.title}`} value={t.columnId} onChange={(e) => changeStatus(t, e.target.value)} className="h-8 w-auto min-w-32 text-[13px]">
                         {cols.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                       </Select>}
                     </td>

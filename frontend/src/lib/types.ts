@@ -65,4 +65,6 @@ export interface Task {
   createdBy: Person;
   createdAt: string;
   updatedAt: string;
+  /** Concurrency token: send it back with every edit/move; the API answers 409 if it is stale. */
+  version: number;
 }

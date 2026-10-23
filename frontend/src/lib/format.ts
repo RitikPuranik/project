@@ -110,9 +110,93 @@ export function errorMessage(err: unknown, fallback = "Something went wrong. Try
   return fallback;
 }
 
+/**
+ * The user's effective role in a project. Mirrors getProjectRole() in
+ * backend/middleware/access.js — the API is the source of truth; this only decides which
+ * controls to show.
+ */
+export function projectRole(project: Project, user: Person | null): Role | null {
+  if (!user?.role) return null;
+  if (user.role === "admin") return "admin";
+  const isOwner = project.owner?._id === user._id;
+  const entry = project.members.find((m) => m.user._id === user._id);
+  if (!isOwner && !entry) return null;
+  if (user.role === "viewer") return "viewer";
+  if (user.role === "project_manager" && (isOwner || entry?.role === "project_manager")) return "project_manager";
+  return "member";
+}
+
+/** Admin / project manager: create, assign, edit, delete tasks and manage the team. */
 export function canManageProject(project: Project, user: Person | null): boolean {
-  if (!user || user.role === "viewer") return false;
-  if (user.role === "admin") return true;
-  if (project.owner?._id === user._id) return true;
-  return project.members.some((m) => m.user._id === user._id && m.role === "project_manager");
+  const r = projectRole(project, user);
+  return r === "admin" || r === "project_manager";
+}
+export const canManageTasks = canManageProject;
+
+/** Managers on any task; team members only on tasks assigned to them (status, subtasks, limited edits). */
+export function canWorkOnTask(project: Project, user: Person | null, task: Task): boolean {
+  if (canManageProject(project, user)) return true;
+  return projectRole(project, user) === "member" && !!user && task.assignees.some((a) => a._id === user._id);
+}
+
+/** Admin, project manager and team member may comment; viewers may not. */
+export function canComment(project: Project, user: Person | null): boolean {
+  const r = projectRole(project, user);
+  return r === "admin" || r === "project_manager" || r === "member";
+}
+
+// ---- Concurrent edits (optimistic concurrency) ---------------------------------------------
+
+export const CONFLICT_TOAST = "Someone else changed this task. The latest version is now shown.";
+
+/** The latest task from a 409 "version conflict" response, or null for any other error. */
+export function conflictFrom(err: unknown): Task | null {
+  const r = (err as { response?: { status?: number; data?: { code?: string; task?: Task } } })?.response;
+  return r?.status === 409 && r.data?.code === "VERSION_CONFLICT" && r.data.task ? r.data.task : null;
+}
+
+/** True when the task was deleted by someone else while the user was working on it. */
+export function isTaskGone(err: unknown): boolean {
+  return (err as { response?: { data?: { code?: string } } })?.response?.data?.code === "TASK_GONE";
+}
+
+/** Editable task fields as comparable values (shared by the edit form and conflict diffing). */
+export interface TaskFields {
+  title: string;
+  description: string;
+  priority: Priority;
+  type: TaskType;
+  dueDate: string;
+  storyPoints: number;
+  assignees: string[];
+  labels: string[];
+}
+export const FIELD_LABEL: Record<keyof TaskFields | "columnId", string> = {
+  title: "Title",
+  description: "Description",
+  priority: "Priority",
+  type: "Type",
+  dueDate: "Due date",
+  storyPoints: "Story points",
+  assignees: "Assignees",
+  labels: "Labels",
+  columnId: "Status",
+};
+
+export function taskFields(t: Task): TaskFields {
+  return {
+    title: t.title,
+    description: t.description ?? "",
+    priority: t.priority,
+    type: t.type,
+    dueDate: toDateInput(t.dueDate),
+    storyPoints: t.storyPoints ?? 0,
+    assignees: t.assignees.map((a) => a._id).sort(),
+    labels: t.labels,
+  };
+}
+
+/** Keys whose values differ between two field sets. */
+export function differingFields(a: TaskFields, b: TaskFields): (keyof TaskFields)[] {
+  return (Object.keys(a) as (keyof TaskFields)[]).filter((k) => JSON.stringify(a[k]) !== JSON.stringify(b[k]));
 }

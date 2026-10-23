@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import api from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { PRIORITIES, TYPES, canEdit, dueLabel, errorMessage, formatDate, formatDateTime, isDone, sortedColumns } from "@/lib/format";
+import { CONFLICT_TOAST, PRIORITIES, TYPES, canComment, canEdit, canManageTasks, canWorkOnTask, conflictFrom, dueLabel, errorMessage, formatDate, formatDateTime, isDone, isTaskGone, sortedColumns } from "@/lib/format";
 import type { Priority, Project, Task, TaskType } from "@/lib/types";
 import { useFetch } from "@/lib/useFetch";
 import { Avatar, Button, ConfirmModal, ErrorNote, Input, PageLoader, ReadOnlyNote, Select, Textarea, cx, useToast } from "@/components/ui";
@@ -23,26 +23,42 @@ export default function TaskDetail() {
   const [subtask, setSubtask] = useState("");
   const [comment, setComment] = useState("");
   const [posting, setPosting] = useState(false);
+  const [stale, setStale] = useState(false);
   const editable = canEdit(user);
 
   if (error && !data) return <ErrorNote message={error} onRetry={reload} />;
   if (!data) return <PageLoader label="Loading task" />;
   const { task, project } = data;
+  const manage = canManageTasks(project, user);
+  const work = canWorkOnTask(project, user, task);
+  const commenting = canComment(project, user);
   const cols = sortedColumns(project);
   const base = `/projects/${project._id}/tasks/${task._id}`;
   const due = dueLabel(task.dueDate);
   const done = isDone(task, project);
   const subDone = task.subtasks.filter((s) => s.done).length;
 
+  // Every state-changing call carries the version this page last loaded. If someone else got
+  // there first the API answers 409; we reload so the user is looking at the latest version.
   async function act(fn: () => Promise<unknown>) {
     try {
       await fn();
+      setStale(false);
       reload();
     } catch (err) {
-      toast(errorMessage(err), "error");
+      if (isTaskGone(err)) {
+        toast(errorMessage(err), "error");
+        navigate(`/projects/${project._id}`, { replace: true });
+      } else if (conflictFrom(err)) {
+        setStale(true);
+        toast(CONFLICT_TOAST, "error");
+        reload();
+      } else {
+        toast(errorMessage(err), "error");
+      }
     }
   }
-  const patch = (body: Partial<Pick<Task, "priority" | "type">>) => act(() => api.put(base, body));
+  const patch = (body: Partial<Pick<Task, "priority" | "type">>) => act(() => api.put(base, { ...body, version: task.version }));
 
   const side = "flex items-center justify-between gap-4 border-b border-line py-3 text-sm last:border-0";
 
@@ -50,12 +66,18 @@ export default function TaskDetail() {
     <>
       <Link to={`/projects/${project._id}`} className="mb-3 inline-block text-sm text-muted hover:text-ink">← {project.name}</Link>
       {!editable && <ReadOnlyNote />}
+      {stale && (
+        <p role="status" className="mb-4 flex items-center justify-between gap-3 rounded-xl bg-amber-wash px-4 py-2.5 text-sm text-[#7a5200]">
+          <span>Someone else changed this task, so your change wasn&apos;t applied. You&apos;re now looking at the latest version — review it and try again.</span>
+          <button type="button" className="shrink-0 underline" onClick={() => setStale(false)}>Dismiss</button>
+        </p>
+      )}
       <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
         <h1 className={cx("max-w-3xl text-[28px] leading-tight font-semibold", done && "text-muted")}>{task.title}</h1>
-        {editable && (
+        {work && (
           <div className="flex gap-2">
             <Button size="sm" onClick={() => setEditing(true)}>Edit</Button>
-            <Button size="sm" variant="ghost" className="text-danger hover:text-danger" onClick={() => setDeleting(true)}>Delete</Button>
+            {manage && <Button size="sm" variant="ghost" className="text-danger hover:text-danger" onClick={() => setDeleting(true)}>Delete</Button>}
           </div>
         )}
       </div>
@@ -81,13 +103,13 @@ export default function TaskDetail() {
               {task.subtasks.map((s) => (
                 <li key={s._id}>
                   <label className="flex cursor-pointer items-center gap-3 rounded-lg px-1 py-1.5 text-sm hover:bg-paper">
-                    <input type="checkbox" checked={s.done} disabled={!editable} onChange={() => act(() => api.put(`${base}/subtasks/${s._id}`))} className="size-4 accent-[#0a7c72]" />
+                    <input type="checkbox" checked={s.done} disabled={!work} onChange={() => act(() => api.put(`${base}/subtasks/${s._id}`, { version: task.version }))} className="size-4 accent-[#0a7c72]" />
                     <span className={cx(s.done && "text-muted line-through")}>{s.title}</span>
                   </label>
                 </li>
               ))}
             </ul>
-            {editable && <form
+            {work && <form
               className="mt-3 flex gap-2"
               onSubmit={(e) => {
                 e.preventDefault();
@@ -114,9 +136,9 @@ export default function TaskDetail() {
                   </div>
                 </li>
               ))}
-              {task.comments.length === 0 && <li className="text-sm text-muted">{editable ? "No comments yet. Start the conversation." : "No comments yet."}</li>}
+              {task.comments.length === 0 && <li className="text-sm text-muted">{commenting ? "No comments yet. Start the conversation." : "No comments yet."}</li>}
             </ul>
-            {editable && <form
+            {commenting && <form
               className="mt-5 flex flex-col items-end gap-2"
               onSubmit={async (e) => {
                 e.preventDefault();
@@ -138,23 +160,23 @@ export default function TaskDetail() {
             <label htmlFor="status" className="text-muted">Status</label>
             <Select
               id="status"
-              disabled={!editable}
+              disabled={!work}
               value={task.columnId}
               className="h-8 w-auto min-w-36 text-[13px]"
-              onChange={(e) => act(() => api.put(`${base}/move`, { columnId: e.target.value, order: Date.now() }))}
+              onChange={(e) => act(() => api.put(`${base}/move`, { columnId: e.target.value, order: Date.now(), version: task.version }))}
             >
               {cols.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </Select>
           </div>
           <div className={side}>
             <label htmlFor="prio" className="text-muted">Priority</label>
-            <Select id="prio" disabled={!editable} value={task.priority} className="h-8 w-auto min-w-36 text-[13px] capitalize" onChange={(e) => patch({ priority: e.target.value as Priority })}>
+            <Select id="prio" disabled={!manage} value={task.priority} className="h-8 w-auto min-w-36 text-[13px] capitalize" onChange={(e) => patch({ priority: e.target.value as Priority })}>
               {PRIORITIES.map((p) => <option key={p} value={p}>{p}</option>)}
             </Select>
           </div>
           <div className={side}>
             <label htmlFor="type" className="text-muted">Type</label>
-            <Select id="type" disabled={!editable} value={task.type} className="h-8 w-auto min-w-36 text-[13px] capitalize" onChange={(e) => patch({ type: e.target.value as TaskType })}>
+            <Select id="type" disabled={!manage} value={task.type} className="h-8 w-auto min-w-36 text-[13px] capitalize" onChange={(e) => patch({ type: e.target.value as TaskType })}>
               {TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
             </Select>
           </div>
@@ -188,7 +210,7 @@ export default function TaskDetail() {
       </div>
 
       {editing && (
-        <TaskForm open project={project} task={task} onClose={() => setEditing(false)} onSaved={() => { setEditing(false); toast("Task updated"); reload(); }} />
+        <TaskForm open project={project} task={task} restricted={!manage} onClose={() => setEditing(false)} onSaved={() => { setEditing(false); toast("Task updated"); reload(); }} />
       )}
       <ConfirmModal
         open={deleting}
@@ -198,12 +220,18 @@ export default function TaskDetail() {
         onClose={() => setDeleting(false)}
         onConfirm={async () => {
           try {
-            await api.delete(base);
+            await api.delete(base, { params: { version: task.version } });
             toast("Task deleted");
             navigate(`/projects/${project._id}`, { replace: true });
           } catch (err) {
-            toast(errorMessage(err), "error");
             setDeleting(false);
+            if (conflictFrom(err)) {
+              setStale(true);
+              toast(CONFLICT_TOAST, "error");
+              reload();
+            } else {
+              toast(errorMessage(err), "error");
+            }
           }
         }}
       />

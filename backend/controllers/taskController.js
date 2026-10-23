@@ -1,35 +1,174 @@
+import mongoose from "mongoose";
 import Task from "../models/Task.js";
-import Project from "../models/Project.js";
+import { projectParticipantIds } from "../middleware/access.js";
+
+/*
+ * Authorization model (enforced here, on the server — the UI is only a convenience).
+ * req.project / req.projectRole / req.task are populated by the param handlers in
+ * middleware/access.js, which have already rejected non-participants with 403/404.
+ *
+ *  Action                      admin  project_manager  member                         viewer
+ *  create task / assign        yes    yes              no                             no
+ *  edit task details           yes    yes              own assigned, limited fields   no
+ *  change status (move)        yes    yes              own assigned                   no
+ *  subtasks (add / toggle)     yes    yes              own assigned                   no
+ *  comment                     yes    yes              yes (tasks in their projects)  no
+ *  delete task                 yes    yes              no                             no
+ */
+const MANAGERS = ["admin", "project_manager"];
+const COMMENTERS = ["admin", "project_manager", "member"];
+
+// Fields a Team Member may change on a task assigned to them. Everything else
+// (title, priority, type, due date, assignees) is manager-controlled.
+const MEMBER_EDITABLE_FIELDS = ["description", "labels", "storyPoints"];
+const ALL_EDITABLE_FIELDS = [
+  "title",
+  "description",
+  "priority",
+  "type",
+  "dueDate",
+  "storyPoints",
+  "assignees",
+  "labels",
+];
+
+const forbidden = (res, message) => res.status(403).json({ message: `Forbidden: ${message}` });
+
+const isAssignee = (task, user) => task.assignees.some((a) => a.toString() === user._id.toString());
+
+// Managers may act on any task in their project; members only on tasks assigned to them.
+const canWorkOnTask = (req) =>
+  MANAGERS.includes(req.projectRole) ||
+  (req.projectRole === "member" && isAssignee(req.task, req.user));
+
+/*
+ * Optimistic concurrency control
+ * ------------------------------
+ * Every state-changing write to an existing task (update, move, subtask toggle, delete)
+ * must carry the `version` the client last saw (body.version, or ?version= for DELETE).
+ *   - missing/invalid version  -> 428 Precondition Required
+ *   - version already stale    -> 409 Conflict (early check, avoids pointless work)
+ *   - lost a race              -> 409 Conflict (the real guarantee: the write is a single
+ *                                 findOneAndUpdate filtered on {_id, version}, so MongoDB
+ *                                 applies it only if nobody else wrote in between)
+ * The 409 body carries the latest task so the UI can show what changed.
+ */
+const readVersion = (req) => {
+  const raw = req.body?.version ?? req.query?.version;
+  const v = typeof raw === "string" && raw.trim() !== "" ? Number(raw) : raw;
+  return Number.isInteger(v) && v >= 0 ? v : null;
+};
+
+const versionRequired = (res) =>
+  res.status(428).json({
+    code: "VERSION_REQUIRED",
+    message: "The task's current version is required. Reload the task and try again.",
+  });
+
+// Matches a specific version; tasks created before versioning existed count as version 0.
+const atVersion = (id, version) => ({
+  _id: id,
+  isDeleted: false,
+  ...(version === 0 ? { $or: [{ version: 0 }, { version: { $exists: false } }] } : { version }),
+});
+
+const POPULATE = [
+  { path: "assignees", select: "name email avatar" },
+  { path: "createdBy", select: "name email" },
+  { path: "comments.author", select: "name avatar" },
+];
+
+const conflict = async (res, taskId) => {
+  const latest = await Task.findOne({ _id: taskId, isDeleted: false }).populate(POPULATE);
+  if (!latest) {
+    return res.status(404).json({ code: "TASK_GONE", message: "This task was deleted by someone else." });
+  }
+  return res.status(409).json({
+    code: "VERSION_CONFLICT",
+    message: "This task was changed by someone else since you opened it. Review the latest version.",
+    currentVersion: latest.version,
+    task: latest,
+  });
+};
+
+const serverError = (res, message, err) => {
+  const clientError = err.name === "ValidationError" || err.name === "CastError";
+  res.status(clientError ? 400 : 500).json({ message, error: err.message });
+};
+
+// Assignees must be real ids of people who participate in this project.
+const parseAssignees = (project, raw) => {
+  if (!Array.isArray(raw)) return { error: "assignees must be an array of user ids" };
+  const unique = [...new Set(raw.map(String))];
+  const allowed = new Set(projectParticipantIds(project));
+  for (const id of unique) {
+    if (!mongoose.isValidObjectId(id) || !allowed.has(id)) {
+      return { error: "Every assignee must be a member of this project" };
+    }
+  }
+  return { ids: unique };
+};
+
+// Compare an incoming value with what is stored, so a member re-submitting the full edit
+// form (with unchanged restricted fields) is not rejected — only actual changes are.
+const unchanged = (field, incoming, current) => {
+  switch (field) {
+    case "assignees":
+      return (
+        Array.isArray(incoming) &&
+        JSON.stringify([...incoming].map(String).sort()) ===
+          JSON.stringify(current.map((a) => a.toString()).sort())
+      );
+    case "dueDate": {
+      const a = incoming ? new Date(incoming).getTime() : null;
+      const b = current ? new Date(current).getTime() : null;
+      return a === b;
+    }
+    case "labels":
+      return JSON.stringify(incoming) === JSON.stringify(current);
+    default:
+      return incoming === current;
+  }
+};
+
+const normalizeSubtasks = (subtasks) =>
+  (Array.isArray(subtasks) ? subtasks : [])
+    .map((s) => (typeof s === "string" ? { title: s } : { title: s?.title, done: !!s?.done }))
+    .filter((s) => typeof s.title === "string" && s.title.trim());
 
 // @route POST /api/projects/:projectId/tasks
 export const createTask = async (req, res) => {
   try {
-    const { projectId } = req.params;
-    const project = await Project.findById(projectId);
-    if (!project || project.isDeleted) return res.status(404).json({ message: "Project not found" });
+    if (!MANAGERS.includes(req.projectRole)) {
+      return forbidden(res, "only admins and project managers can create tasks");
+    }
+    const project = req.project;
 
-    const {
-      title,
-      description,
-      columnId,
-      priority,
-      type,
-      dueDate,
-      storyPoints,
-      assignees,
-      labels,
-      subtasks,
-    } = req.body;
+    const { title, description, columnId, priority, type, dueDate, storyPoints, labels, subtasks } =
+      req.body;
 
-    if (!title) return res.status(400).json({ message: "Task title is required" });
+    if (!title || typeof title !== "string" || !title.trim()) {
+      return res.status(400).json({ message: "Task title is required" });
+    }
 
-    const targetColumn = columnId || project.columns[0].id;
-    const lastTask = await Task.findOne({ project: projectId, columnId: targetColumn })
+    const targetColumn = columnId || project.columns[0]?.id;
+    if (!project.columns.some((c) => c.id === targetColumn)) {
+      return res.status(400).json({ message: "Unknown column for this project" });
+    }
+
+    let assignees = [];
+    if (req.body.assignees !== undefined) {
+      const parsed = parseAssignees(project, req.body.assignees);
+      if (parsed.error) return res.status(400).json({ message: parsed.error });
+      assignees = parsed.ids;
+    }
+
+    const lastTask = await Task.findOne({ project: project._id, columnId: targetColumn, isDeleted: false })
       .sort({ order: -1 })
       .select("order");
 
     const task = await Task.create({
-      project: projectId,
+      project: project._id,
       title,
       description,
       columnId: targetColumn,
@@ -40,31 +179,35 @@ export const createTask = async (req, res) => {
       storyPoints,
       assignees,
       labels,
-      subtasks: (subtasks || []).map((s) => (typeof s === "string" ? { title: s } : s)),
+      subtasks: normalizeSubtasks(subtasks),
       createdBy: req.user._id,
     });
 
     res.status(201).json(task);
   } catch (err) {
-    res.status(500).json({ message: "Failed to create task", error: err.message });
+    serverError(res, "Failed to create task", err);
   }
 };
 
 // @route GET /api/projects/:projectId/tasks  (supports ?assignee=&priority=&dueBefore=&dueAfter=)
 export const getTasks = async (req, res) => {
   try {
-    const { projectId } = req.params;
+    // Listing is only meaningful (and only access-checked) inside a project.
+    if (!req.params.projectId) {
+      return res.status(400).json({ message: "Use /api/projects/:projectId/tasks to list tasks" });
+    }
     const { assignee, priority, dueBefore, dueAfter, type, label } = req.query;
 
-    const filter = { project: projectId, isDeleted: false };
-    if (assignee) filter.assignees = assignee;
-    if (priority) filter.priority = priority;
-    if (type) filter.type = type;
-    if (label) filter.labels = label;
+    const filter = { project: req.project._id, isDeleted: false };
+    // Coerce to strings so query-string objects (?assignee[$ne]=x) can't inject operators.
+    if (assignee) filter.assignees = String(assignee);
+    if (priority) filter.priority = String(priority);
+    if (type) filter.type = String(type);
+    if (label) filter.labels = String(label);
     if (dueBefore || dueAfter) {
       filter.dueDate = {};
-      if (dueBefore) filter.dueDate.$lte = new Date(dueBefore);
-      if (dueAfter) filter.dueDate.$gte = new Date(dueAfter);
+      if (dueBefore) filter.dueDate.$lte = new Date(String(dueBefore));
+      if (dueAfter) filter.dueDate.$gte = new Date(String(dueAfter));
     }
 
     const tasks = await Task.find(filter)
@@ -74,126 +217,200 @@ export const getTasks = async (req, res) => {
 
     res.json(tasks);
   } catch (err) {
-    res.status(500).json({ message: "Failed to fetch tasks", error: err.message });
+    serverError(res, "Failed to fetch tasks", err);
   }
 };
 
-// @route PUT /api/tasks/:id
+// @route PUT /api/tasks/:id   (also PUT /api/projects/:projectId/tasks/:id)
+// Body: any editable fields + `version` (required).
 export const updateTask = async (req, res) => {
   try {
-    const task = await Task.findById(req.params.id);
-    if (!task || task.isDeleted) return res.status(404).json({ message: "Task not found" });
+    if (!canWorkOnTask(req)) {
+      return forbidden(res, "you can only edit tasks assigned to you");
+    }
+    const task = req.task;
 
-    const fields = [
-      "title",
-      "description",
-      "priority",
-      "type",
-      "dueDate",
-      "storyPoints",
-      "assignees",
-      "labels",
-    ];
-    fields.forEach((f) => {
-      if (req.body[f] !== undefined) task[f] = req.body[f];
-    });
+    const version = readVersion(req);
+    if (version === null) return versionRequired(res);
+    if ((task.version ?? 0) !== version) return conflict(res, task._id);
 
-    await task.save();
-    res.json(task);
+    const submitted = ALL_EDITABLE_FIELDS.filter((f) => req.body[f] !== undefined);
+
+    if (req.projectRole === "member") {
+      const blocked = submitted.filter(
+        (f) => !MEMBER_EDITABLE_FIELDS.includes(f) && !unchanged(f, req.body[f], task[f])
+      );
+      if (blocked.length) {
+        return forbidden(
+          res,
+          `team members cannot change: ${blocked.join(", ")}. Allowed fields: ${MEMBER_EDITABLE_FIELDS.join(", ")}`
+        );
+      }
+    }
+
+    const writable = MANAGERS.includes(req.projectRole) ? ALL_EDITABLE_FIELDS : MEMBER_EDITABLE_FIELDS;
+    const set = {};
+    writable
+      .filter((f) => req.body[f] !== undefined)
+      .forEach((f) => {
+        set[f] = req.body[f];
+      });
+
+    if (set.assignees !== undefined) {
+      const parsed = parseAssignees(req.project, set.assignees);
+      if (parsed.error) return res.status(400).json({ message: parsed.error });
+      set.assignees = parsed.ids;
+    }
+
+    if (!Object.keys(set).length) return res.json(task); // nothing to change, nothing to bump
+
+    const updated = await Task.findOneAndUpdate(
+      atVersion(task._id, version),
+      { $set: set, $inc: { version: 1 } },
+      { new: true, runValidators: true }
+    );
+    if (!updated) return conflict(res, task._id); // someone else won the race
+    res.json(updated);
   } catch (err) {
-    res.status(500).json({ message: "Failed to update task", error: err.message });
+    serverError(res, "Failed to update task", err);
   }
 };
 
 // @route PUT /api/tasks/:id/move  (drag-and-drop: change column and/or order)
+// Body: { columnId, order, version }
 export const moveTask = async (req, res) => {
   try {
+    if (!canWorkOnTask(req)) {
+      return forbidden(res, "you can only change the status of tasks assigned to you");
+    }
+    const version = readVersion(req);
+    if (version === null) return versionRequired(res);
+    if ((req.task.version ?? 0) !== version) return conflict(res, req.task._id);
+
     const { columnId, order } = req.body;
-    const task = await Task.findById(req.params.id);
-    if (!task || task.isDeleted) return res.status(404).json({ message: "Task not found" });
+    if (!req.project.columns.some((c) => c.id === columnId)) {
+      return res.status(400).json({ message: "Unknown column for this project" });
+    }
+    if (typeof order !== "number" || !Number.isFinite(order)) {
+      return res.status(400).json({ message: "order must be a number" });
+    }
 
-    task.columnId = columnId;
-    task.order = order;
-    await task.save();
-
-    res.json(task);
+    const updated = await Task.findOneAndUpdate(
+      atVersion(req.task._id, version),
+      { $set: { columnId, order }, $inc: { version: 1 } },
+      { new: true, runValidators: true }
+    );
+    if (!updated) return conflict(res, req.task._id);
+    res.json(updated);
   } catch (err) {
-    res.status(500).json({ message: "Failed to move task", error: err.message });
+    serverError(res, "Failed to move task", err);
   }
 };
 
-// @route DELETE /api/tasks/:id
+// @route DELETE /api/tasks/:id?version=N
 export const deleteTask = async (req, res) => {
   try {
-    const task = await Task.findById(req.params.id);
-    if (!task) return res.status(404).json({ message: "Task not found" });
+    if (!MANAGERS.includes(req.projectRole)) {
+      return forbidden(res, "only admins and project managers can delete tasks");
+    }
+    const version = readVersion(req);
+    if (version === null) return versionRequired(res);
+    if ((req.task.version ?? 0) !== version) return conflict(res, req.task._id);
 
-    task.isDeleted = true;
-    await task.save();
+    const deleted = await Task.findOneAndUpdate(
+      atVersion(req.task._id, version),
+      { $set: { isDeleted: true }, $inc: { version: 1 } },
+      { new: true }
+    );
+    if (!deleted) return conflict(res, req.task._id);
     res.json({ message: "Task deleted" });
   } catch (err) {
-    res.status(500).json({ message: "Failed to delete task", error: err.message });
+    serverError(res, "Failed to delete task", err);
   }
 };
 
 // @route POST /api/tasks/:id/subtasks
+// Append-only: a single atomic $push, so it can't clobber (or be clobbered by) other edits
+// and does not need — or bump — the task version.
 export const addSubtask = async (req, res) => {
   try {
+    if (!canWorkOnTask(req)) {
+      return forbidden(res, "you can only edit tasks assigned to you");
+    }
     const { title } = req.body;
-    const task = await Task.findById(req.params.id);
-    if (!task) return res.status(404).json({ message: "Task not found" });
+    if (typeof title !== "string" || !title.trim()) {
+      return res.status(400).json({ message: "Subtask title is required" });
+    }
 
-    task.subtasks.push({ title, done: false });
-    await task.save();
-    res.json(task);
+    const updated = await Task.findOneAndUpdate(
+      { _id: req.task._id, isDeleted: false },
+      { $push: { subtasks: { title: title.trim(), done: false } } },
+      { new: true, runValidators: true }
+    );
+    if (!updated) return res.status(404).json({ message: "Task not found" });
+    res.json(updated);
   } catch (err) {
-    res.status(500).json({ message: "Failed to add subtask", error: err.message });
+    serverError(res, "Failed to add subtask", err);
   }
 };
 
-// @route PUT /api/tasks/:id/subtasks/:subtaskId
+// @route PUT /api/tasks/:id/subtasks/:subtaskId   Body: { version }
+// Toggling reads the current value, so it is version-guarded. It sets only that one
+// subtask's `done` (positional $), so it can't overwrite a concurrently appended subtask.
 export const toggleSubtask = async (req, res) => {
   try {
-    const task = await Task.findById(req.params.id);
-    if (!task) return res.status(404).json({ message: "Task not found" });
+    if (!canWorkOnTask(req)) {
+      return forbidden(res, "you can only edit tasks assigned to you");
+    }
+    const version = readVersion(req);
+    if (version === null) return versionRequired(res);
+    if ((req.task.version ?? 0) !== version) return conflict(res, req.task._id);
 
-    const subtask = task.subtasks.id(req.params.subtaskId);
+    const subtask = req.task.subtasks.id(req.params.subtaskId);
     if (!subtask) return res.status(404).json({ message: "Subtask not found" });
 
-    subtask.done = !subtask.done;
-    await task.save();
-    res.json(task);
+    const updated = await Task.findOneAndUpdate(
+      { ...atVersion(req.task._id, version), "subtasks._id": subtask._id },
+      { $set: { "subtasks.$.done": !subtask.done }, $inc: { version: 1 } },
+      { new: true }
+    );
+    if (!updated) return conflict(res, req.task._id);
+    res.json(updated);
   } catch (err) {
-    res.status(500).json({ message: "Failed to update subtask", error: err.message });
+    serverError(res, "Failed to update subtask", err);
   }
 };
 
 // @route POST /api/tasks/:id/comments
+// Append-only atomic $push; never conflicts with edits, so no version needed or bumped.
 export const addComment = async (req, res) => {
   try {
+    if (!COMMENTERS.includes(req.projectRole)) {
+      return forbidden(res, "your role cannot comment on tasks");
+    }
     const { text } = req.body;
-    const task = await Task.findById(req.params.id);
-    if (!task) return res.status(404).json({ message: "Task not found" });
+    if (typeof text !== "string" || !text.trim()) {
+      return res.status(400).json({ message: "Comment text is required" });
+    }
 
-    task.comments.push({ author: req.user._id, text });
-    await task.save();
-    await task.populate("comments.author", "name avatar");
-    res.json(task);
+    const updated = await Task.findOneAndUpdate(
+      { _id: req.task._id, isDeleted: false },
+      { $push: { comments: { author: req.user._id, text: text.trim() } } },
+      { new: true, runValidators: true }
+    ).populate("comments.author", "name avatar");
+    if (!updated) return res.status(404).json({ message: "Task not found" });
+    res.json(updated);
   } catch (err) {
-    res.status(500).json({ message: "Failed to add comment", error: err.message });
+    serverError(res, "Failed to add comment", err);
   }
 };
 
 // @route GET /api/tasks/:id  (also GET /api/projects/:projectId/tasks/:id)
 export const getTask = async (req, res) => {
   try {
-    const task = await Task.findOne({ _id: req.params.id, isDeleted: false })
-      .populate("assignees", "name email avatar")
-      .populate("createdBy", "name email")
-      .populate("comments.author", "name avatar");
-    if (!task) return res.status(404).json({ message: "Task not found" });
-    res.json(task);
+    await req.task.populate(POPULATE);
+    res.json(req.task);
   } catch (err) {
-    res.status(500).json({ message: "Failed to fetch task", error: err.message });
+    serverError(res, "Failed to fetch task", err);
   }
 };
