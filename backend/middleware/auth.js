@@ -36,3 +36,11 @@ export const authorize = (...roles) => {
     next();
   };
 };
+
+// Viewers are read-only: any request that is not GET/HEAD/OPTIONS is rejected with 403.
+export const blockViewerWrites = (req, res, next) => {
+  if (req.user?.role === "viewer" && !["GET", "HEAD", "OPTIONS"].includes(req.method)) {
+    return res.status(403).json({ message: "Forbidden: viewers have read-only access" });
+  }
+  next();
+};

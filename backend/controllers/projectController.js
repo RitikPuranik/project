@@ -180,6 +180,15 @@ export const addMember = async (req, res) => {
       return res.status(400).json({ message: "User is already a member" });
     }
 
+    const targetUser = await User.findById(userId);
+    if (!targetUser) return res.status(404).json({ message: "User not found" });
+
+    // Project Manager can choose a Viewer to become a Member
+    if (targetUser.role === "viewer") {
+      targetUser.role = "member";
+      await targetUser.save();
+    }
+
     project.members.push({ user: userId, role: role === "project_manager" ? "project_manager" : "member" });
     await project.save();
     res.json(project);

@@ -10,12 +10,16 @@ import {
   addMember,
   removeMember,
 } from "../controllers/projectController.js";
-import { protect, authorize } from "../middleware/auth.js";
+import { protect, authorize, blockViewerWrites } from "../middleware/auth.js";
+import { projectAccessParam } from "../middleware/access.js";
 import taskRoutes from "./taskRoutes.js";
 
 const router = express.Router();
 
 router.use(protect);
+router.use(blockViewerWrites);
+router.param("id", projectAccessParam);
+router.param("projectId", projectAccessParam);
 
 router.route("/").post(authorize("admin", "project_manager"), createProject).get(getProjects);
 router.route("/:id").get(getProject).put(updateProject).delete(deleteProject);

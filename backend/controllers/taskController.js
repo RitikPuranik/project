@@ -183,3 +183,17 @@ export const addComment = async (req, res) => {
     res.status(500).json({ message: "Failed to add comment", error: err.message });
   }
 };
+
+// @route GET /api/tasks/:id  (also GET /api/projects/:projectId/tasks/:id)
+export const getTask = async (req, res) => {
+  try {
+    const task = await Task.findOne({ _id: req.params.id, isDeleted: false })
+      .populate("assignees", "name email avatar")
+      .populate("createdBy", "name email")
+      .populate("comments.author", "name avatar");
+    if (!task) return res.status(404).json({ message: "Task not found" });
+    res.json(task);
+  } catch (err) {
+    res.status(500).json({ message: "Failed to fetch task", error: err.message });
+  }
+};

@@ -8,8 +8,8 @@ const userSchema = new mongoose.Schema(
     password: { type: String, required: true, minlength: 6 },
     role: {
       type: String,
-      enum: ["admin", "project_manager", "member"],
-      default: "member",
+      enum: ["admin", "project_manager", "member", "viewer"],
+      default: "viewer",
     },
     avatar: { type: String, default: "" },
     isVerified: { type: Boolean, default: true }, // simplified: no email verification flow wired up yet
