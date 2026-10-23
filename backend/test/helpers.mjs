@@ -195,7 +195,7 @@ export const call = async (user, method, path, body) => {
     },
     body: body ? JSON.stringify(body) : undefined,
   });
-  return { status: res.status, body: await res.json().catch(() => ({})) };
+  return { status: res.status, headers: res.headers, body: await res.json().catch(() => ({})) };
 };
 
 export const P = () => `/projects/${project._id}`;

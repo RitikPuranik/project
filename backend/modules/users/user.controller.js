@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 import User from "./user.model.js";
 import Project from "../projects/project.model.js";
+import Task from "../tasks/task.model.js";
 import { sendEmailQuietly } from "../../shared/email/emailjs.js";
 import { welcomeEmail, passwordChangedEmail } from "../../shared/email/templates.js";
 
@@ -108,7 +109,36 @@ export const listUsers = async (req, res) => {
       });
     }
 
-    const users = await User.find(filter).select("name email role avatar isActive").sort({ name: 1 }).limit(100);
+    const users = await User.find(filter).select("name email role avatar isActive createdAt").sort({ name: 1 }).limit(100);
+
+    // Admin extra: ?counts=true adds how many projects each user is on and how many
+    // not-yet-deleted tasks are assigned to them (shown in the Users table).
+    if (currentUserRole === "admin" && req.query.counts === "true" && users.length) {
+      const ids = users.map((u) => u._id);
+      const [projects, taskCounts] = await Promise.all([
+        Project.find({ isDeleted: false, $or: [{ owner: { $in: ids } }, { "members.user": { $in: ids } }] }).select("owner members.user"),
+        Task.aggregate([
+          { $match: { isDeleted: false, assignees: { $in: ids } } },
+          { $unwind: "$assignees" },
+          { $match: { assignees: { $in: ids } } },
+          { $group: { _id: "$assignees", n: { $sum: 1 } } },
+        ]),
+      ]);
+      const projectCount = new Map();
+      for (const p of projects) {
+        const onProject = new Set([p.owner?.toString(), ...(p.members || []).map((m) => m.user?.toString())]);
+        for (const id of onProject) if (id) projectCount.set(id, (projectCount.get(id) ?? 0) + 1);
+      }
+      const taskCount = new Map(taskCounts.map((r) => [r._id.toString(), r.n]));
+      return res.json(
+        users.map((u) => ({
+          ...u.toObject(),
+          projectCount: projectCount.get(u._id.toString()) ?? 0,
+          taskCount: taskCount.get(u._id.toString()) ?? 0,
+        }))
+      );
+    }
+
     res.json(users);
   } catch (err) {
     res.status(500).json({ message: "Failed to fetch users", error: err.message });

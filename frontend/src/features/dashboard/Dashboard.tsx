@@ -1,10 +1,10 @@
 import { Link } from "react-router-dom";
 import api from "@/shared/lib/api";
 import { useAuth } from "@/features/auth/auth";
-import { daysFromToday, dueLabel, isDone } from "@/shared/lib/format";
+import { daysFromToday, dueLabel, greeting, isDone, percent, projectPeople } from "@/shared/lib/format";
 import type { Project, Task } from "@/shared/lib/types";
 import { useFetch } from "@/shared/lib/useFetch";
-import { EmptyState, ErrorNote, PageLoader, PriorityBadge, StageBar, cx } from "@/shared/components/ui";
+import { EmptyState, ErrorNote, PageLoader, PriorityBadge, ProgressRing, StageBar, StatCard, cx } from "@/shared/components/ui";
 
 interface Row {
   project: Project;
@@ -35,6 +35,12 @@ export default function Dashboard() {
   const thisWeek = mine.filter(({ t }) => t.dueDate && daysFromToday(t.dueDate) >= 0 && daysFromToday(t.dueDate) <= 7).length;
   const first = user?.name.split(" ")[0] ?? "there";
 
+  // Workspace-wide numbers for the stat cards (active projects only).
+  const allTasks = data.flatMap(({ project, tasks }) => tasks.map((t) => ({ t, project })));
+  const doneCount = allTasks.filter(({ t, project }) => isDone(t, project)).length;
+  const completion = percent(doneCount, allTasks.length);
+  const peopleCount = new Set(data.flatMap(({ project }) => projectPeople(project).map((p) => p._id))).size;
+
   const headline =
     mine.length === 0
       ? "You're all caught up."
@@ -46,14 +52,21 @@ export default function Dashboard() {
 
   return (
     <>
-      <p className="text-sm text-muted">Hi {first}</p>
-      <h1 className="mt-1 mb-8 text-[34px] leading-tight font-semibold">{headline}</h1>
+      <p className="text-sm text-muted">{greeting()}, {first}</p>
+      <h1 className="mt-1 mb-6 text-[34px] leading-tight font-semibold">{headline}</h1>
+
+      <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <StatCard label="Active projects" value={data.length} hint="Projects in motion" tone="accent" />
+        <StatCard label="Total tasks" value={allTasks.length} hint="Across your projects" tone="blue" progress={completion} />
+        <StatCard label="Completed" value={doneCount} hint={`${completion}% completion rate`} tone="accent" progress={completion} />
+        <StatCard label="People" value={peopleCount} hint="Collaborating with you" tone="violet" />
+      </div>
 
       <div className="grid gap-6 xl:grid-cols-[1.4fr_1fr]">
-        <section aria-labelledby="mine-h" className="rounded-2xl border border-line bg-surface">
+        <section aria-labelledby="mine-h" className="h-fit rounded-2xl border border-line bg-surface xl:row-span-2">
           <div className="flex items-center justify-between border-b border-line px-5 py-4">
             <h2 id="mine-h" className="text-lg font-semibold">Assigned to you</h2>
-            <span className="text-sm text-muted">{mine.length} open</span>
+            <span className="flex items-center gap-3 text-sm text-muted">{mine.length} open<Link to="/my-tasks" className="font-medium text-accent-strong hover:underline">View all</Link></span>
           </div>
           {mine.length === 0 ? (
             <div className="p-5"><EmptyState title="Nothing assigned" body="Tasks assigned to you will show up here, soonest due first." /></div>
@@ -100,6 +113,27 @@ export default function Dashboard() {
               ))}
             </ul>
           )}
+        </section>
+
+        <section aria-labelledby="progress-h" className="h-fit rounded-2xl border border-line bg-surface xl:col-start-2">
+          <div className="border-b border-line px-5 py-4">
+            <h2 id="progress-h" className="text-lg font-semibold">Task progress</h2>
+            <p className="text-sm text-muted">Where the work stands right now.</p>
+          </div>
+          <div className="flex flex-col items-center gap-5 px-5 py-6">
+            <ProgressRing value={completion} />
+            <dl className="flex w-full justify-center gap-8 text-sm">
+              <div className="text-center">
+                <dt className="flex items-center justify-center gap-1.5 text-muted"><span className="size-2 rounded-full bg-accent" aria-hidden />Completed</dt>
+                <dd className="font-display mt-0.5 text-xl font-semibold tabular-nums">{doneCount}</dd>
+              </div>
+              <div className="text-center">
+                <dt className="flex items-center justify-center gap-1.5 text-muted"><span className="size-2 rounded-full bg-wash ring-1 ring-line" aria-hidden />Remaining</dt>
+                <dd className="font-display mt-0.5 text-xl font-semibold tabular-nums">{allTasks.length - doneCount}</dd>
+              </div>
+            </dl>
+            <Link to="/my-tasks" className="text-sm font-medium text-accent-strong hover:underline">See my tasks →</Link>
+          </div>
         </section>
       </div>
     </>

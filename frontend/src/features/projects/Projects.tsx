@@ -5,7 +5,7 @@ import { useAuth } from "@/features/auth/auth";
 import { formatDate, projectPeople } from "@/shared/lib/format";
 import type { Project, Task } from "@/shared/lib/types";
 import { useFetch } from "@/shared/lib/useFetch";
-import { AvatarStack, Button, EmptyState, ErrorNote, Input, PageHeader, PageLoader, StageBar, useToast } from "@/shared/components/ui";
+import { AvatarStack, Button, EmptyState, ErrorNote, Input, PageHeader, PageLoader, Segmented, StageBar, StatusPill, useToast } from "@/shared/components/ui";
 import { ProjectForm } from "@/features/projects/ProjectForm";
 
 interface Row {
@@ -19,7 +19,7 @@ export default function Projects() {
   const toast = useToast();
   const [creating, setCreating] = useState(false);
   const [query, setQuery] = useState("");
-  const [showArchived, setShowArchived] = useState(false);
+  const [status, setStatus] = useState<"all" | "active" | "archived">("active");
 
   const { data, error, loading, reload } = useFetch<Row[]>(async () => {
     const { data: projects } = await api.get<Project[]>("/projects");
@@ -34,9 +34,11 @@ export default function Projects() {
   const canCreate = user?.role === "admin";
   const rows = (data ?? []).filter(
     (r) =>
-      (showArchived || !r.project.isArchived) &&
+      (status === "all" || (status === "archived") === !!r.project.isArchived) &&
       r.project.name.toLowerCase().includes(query.trim().toLowerCase())
   );
+  const archivedCount = (data ?? []).filter((r) => r.project.isArchived).length;
+  const total = (data ?? []).length;
 
   return (
     <>
@@ -47,10 +49,16 @@ export default function Projects() {
       />
       <div className="mb-5 flex flex-wrap items-center gap-4">
         <Input type="search" aria-label="Search projects" placeholder="Search projects" value={query} onChange={(e) => setQuery(e.target.value)} className="max-w-xs" />
-        <label className="flex items-center gap-2 text-sm text-muted">
-          <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} className="size-4 accent-[#0a7c72]" />
-          Show archived
-        </label>
+        <Segmented
+          label="Project status"
+          value={status}
+          onChange={setStatus}
+          options={[
+            { value: "active", label: "Active", count: total - archivedCount },
+            { value: "archived", label: "Archived", count: archivedCount },
+            { value: "all", label: "All", count: total },
+          ]}
+        />
       </div>
 
       {error && <ErrorNote message={error} onRetry={reload} />}
@@ -58,7 +66,7 @@ export default function Projects() {
       {!loading && !error && rows.length === 0 && (
         <EmptyState
           title={data?.length ? "No projects match" : "No projects yet"}
-          body={data?.length ? "Try a different search, or show archived projects." : canCreate ? "Create your first project to start adding tasks." : "You'll see projects here once someone adds you to one."}
+          body={data?.length ? "Try a different search or status filter." : canCreate ? "Create your first project to start adding tasks." : "You'll see projects here once someone adds you to one."}
           action={!data?.length && canCreate ? <Button variant="primary" onClick={() => setCreating(true)}>New project</Button> : undefined}
         />
       )}
@@ -68,17 +76,20 @@ export default function Projects() {
           const done = last ? tasks.filter((t) => t.columnId === [...project.columns].sort((a, b) => a.order - b.order).at(-1)!.id).length : 0;
           return (
             <li key={project._id}>
-              <Link to={`/projects/${project._id}`} className="flex h-full flex-col gap-4 rounded-2xl border border-line bg-surface p-5 transition-colors hover:border-[#c0c4dc]">
+              <Link to={`/projects/${project._id}`} className="flex h-full flex-col gap-4 rounded-2xl border border-line bg-surface p-5 transition-colors hover:border-[#cdbf9f]">
                 <div>
                   <div className="flex items-start justify-between gap-2">
                     <h2 className="text-lg leading-snug font-semibold">{project.name}</h2>
-                    {project.isArchived && <span className="rounded-full bg-amber-wash px-2 py-0.5 text-xs font-medium text-[#8a5a00]">Archived</span>}
+                    <StatusPill archived={!!project.isArchived} />
                   </div>
                   <p className="clamp-2 mt-1 min-h-10 text-sm text-muted">{project.description || "No description yet."}</p>
                 </div>
                 <div>
                   <StageBar columns={project.columns} tasks={tasks} />
-                  <p className="mt-2 text-xs text-muted">{tasks.length === 0 ? "No tasks yet" : `${done} of ${tasks.length} tasks done`}</p>
+                  <p className="mt-2 flex justify-between text-xs text-muted">
+                    <span>{tasks.length === 0 ? "No tasks yet" : `${done} of ${tasks.length} tasks done`}</span>
+                    <span>{projectPeople(project).length} {projectPeople(project).length === 1 ? "member" : "members"}</span>
+                  </p>
                 </div>
                 <div className="mt-auto flex items-center justify-between">
                   <AvatarStack people={projectPeople(project)} />

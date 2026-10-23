@@ -1,19 +1,19 @@
 // HTML bodies for every email type. Each returns { subject, html, preview } ready for sendEmail().
 const BRAND = process.env.EMAIL_FROM_NAME || "Orbin";
-const ACCENT = "#0a7c72";
+const ACCENT = "#3a7d4f";
 const esc = (s) =>
   String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 const clientUrl = () => (process.env.CLIENT_URL || "http://localhost:5173").replace(/\/$/, "");
 
 const layout = (title, inner) => `
-<div style="background:#f4f5fa;padding:32px 12px;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#181b33">
-  <table role="presentation" align="center" width="100%" style="max-width:480px;background:#ffffff;border-radius:14px;border:1px solid #e3e5f0;padding:32px">
+<div style="background:#f2ebdd;padding:32px 12px;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#25301f">
+  <table role="presentation" align="center" width="100%" style="max-width:480px;background:#fbf8f1;border-radius:14px;border:1px solid #ddd2bb;padding:32px">
     <tr><td>
       <div style="font-size:20px;font-weight:700;color:${ACCENT};margin-bottom:20px">${esc(BRAND)}</div>
       <h1 style="font-size:20px;margin:0 0 12px">${esc(title)}</h1>
       ${inner}
-      <hr style="border:none;border-top:1px solid #e3e5f0;margin:28px 0 14px">
-      <p style="font-size:12px;color:#7a7f9a;margin:0">You received this email because of activity on your ${esc(BRAND)} account.</p>
+      <hr style="border:none;border-top:1px solid #ddd2bb;margin:28px 0 14px">
+      <p style="font-size:12px;color:#8f9884;margin:0">You received this email because of activity on your ${esc(BRAND)} account.</p>
     </td></tr>
   </table>
 </div>`;
@@ -22,7 +22,7 @@ const p = (t) => `<p style="font-size:14px;line-height:1.6;margin:0 0 14px">${t}
 const button = (href, label) =>
   `<p style="margin:20px 0"><a href="${esc(href)}" style="background:${ACCENT};color:#fff;text-decoration:none;padding:11px 20px;border-radius:9px;font-size:14px;font-weight:600;display:inline-block">${esc(label)}</a></p>`;
 const codeBox = (code) =>
-  `<div style="font-size:32px;letter-spacing:8px;font-weight:700;text-align:center;background:#f4f5fa;border-radius:10px;padding:16px;margin:18px 0;font-family:Menlo,Consolas,monospace">${esc(code)}</div>`;
+  `<div style="font-size:32px;letter-spacing:8px;font-weight:700;text-align:center;background:#f2ebdd;border-radius:10px;padding:16px;margin:18px 0;font-family:Menlo,Consolas,monospace">${esc(code)}</div>`;
 
 const OTP_COPY = {
   reset_password: { subject: "Your password reset code", title: "Reset your password", lead: "Use this code to reset your password." },

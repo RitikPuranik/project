@@ -1,4 +1,5 @@
 import express from "express";
+import mongoose from "mongoose";
 import cors from "cors";
 import { registerRoutes } from "./modules/index.js";
 import { notFound, errorHandler } from "./shared/middleware/errorHandler.js";
@@ -11,7 +12,11 @@ export const createApp = () => {
   app.use(cors({ origin: process.env.CLIENT_URL || "*", credentials: true }));
   app.use(express.json({ limit: "5mb" }));
 
-  app.get("/api/health", (req, res) => res.json({ status: "ok" }));
+  // Liveness + database state. 503 when MongoDB is not connected so load balancers can tell.
+  app.get("/api/health", (req, res) => {
+    const connected = mongoose.connection.readyState === 1;
+    res.status(connected ? 200 : 503).json({ status: connected ? "ok" : "degraded", database: connected ? "connected" : "disconnected" });
+  });
 
   registerRoutes(app);
 

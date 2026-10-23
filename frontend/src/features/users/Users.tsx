@@ -30,7 +30,7 @@ export default function Users() {
     const t = setTimeout(() => {
       api
         .get<Person[]>("/users", {
-          params: { ...(q.trim() && { search: q.trim() }), ...(roleFilter && { role: roleFilter }), ...(statusFilter && { status: statusFilter }) },
+          params: { counts: true, ...(q.trim() && { search: q.trim() }), ...(roleFilter && { role: roleFilter }), ...(statusFilter && { status: statusFilter }) },
         })
         .then((r) => alive && (setUsers(r.data), setError(null)))
         .catch((e) => alive && setError(errorMessage(e)));
@@ -97,11 +97,13 @@ export default function Users() {
         <>
           {users.length === 0 && <p className="mb-3 rounded-xl bg-wash px-4 py-3 text-sm text-muted">No users match these filters.</p>}
           <div className="overflow-x-auto rounded-2xl border border-line bg-surface">
-            <table className="w-full min-w-[720px] text-left text-sm">
+            <table className="w-full min-w-[820px] text-left text-sm">
               <thead>
                 <tr className="border-b border-line text-[13px] text-muted">
                   <th className="px-5 py-3 font-medium">Person</th>
                   <th className="px-5 py-3 font-medium">Role</th>
+                  <th className="px-5 py-3 text-right font-medium">Projects</th>
+                  <th className="px-5 py-3 text-right font-medium">Tasks</th>
                   <th className="px-5 py-3 font-medium">Status</th>
                   <th className="px-5 py-3 text-right font-medium"><span className="sr-only">Actions</span></th>
                 </tr>
@@ -132,6 +134,8 @@ export default function Users() {
                         <option value="admin">Admin</option>
                       </Select>
                     </td>
+                    <td className="px-5 py-3 text-right tabular-nums text-muted">{u.projectCount ?? "–"}</td>
+                    <td className="px-5 py-3 text-right tabular-nums text-muted">{u.taskCount ?? "–"}</td>
                     <td className="px-5 py-3">
                       <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${u.isActive === false ? "bg-wash text-muted" : "bg-accent-wash text-accent-strong"}`}>
                         {u.isActive === false ? "Deactivated" : "Active"}

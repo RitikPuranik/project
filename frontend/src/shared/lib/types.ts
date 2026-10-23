@@ -9,6 +9,9 @@ export interface Person {
   avatar?: string;
   role?: Role;
   isActive?: boolean;
+  /** Admin Users table only (?counts=true): projects the person is on / tasks assigned to them. */
+  projectCount?: number;
+  taskCount?: number;
 }
 
 export interface Column {
@@ -68,4 +71,9 @@ export interface Task {
   updatedAt: string;
   /** Concurrency token: send it back with every edit/move; the API answers 409 if it is stale. */
   version: number;
+}
+
+/** A task from GET /tasks/mine: `project` is a slim object instead of the bare id. */
+export interface MyTask extends Omit<Task, "project"> {
+  project: Pick<Project, "_id" | "name" | "columns" | "isArchived">;
 }

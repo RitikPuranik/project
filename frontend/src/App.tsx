@@ -10,6 +10,8 @@ import Projects from "@/features/projects/Projects";
 import ProjectLayout from "@/features/projects/ProjectLayout";
 import Board from "@/features/tasks/Board";
 import ProjectTasks from "@/features/tasks/ProjectTasks";
+import MyTasks from "@/features/tasks/MyTasks";
+import People from "@/features/team/People";
 import Team from "@/features/projects/Team";
 import TaskDetail from "@/features/tasks/TaskDetail";
 import Users from "@/features/users/Users";
@@ -32,6 +34,8 @@ export default function App() {
           <Route path="tasks" element={<ProjectTasks />} />
           <Route path="team" element={<Team />} />
         </Route>
+        <Route path="/my-tasks" element={<MyTasks />} />
+        <Route path="/team" element={<People />} />
         <Route path="/tasks/:id" element={<TaskDetail />} />
         <Route path="/users" element={<Users />} />
         <Route path="/profile" element={<Profile />} />

@@ -22,7 +22,7 @@ export function TaskCard({
       {...drag}
       draggable={!readOnly}
       className={cx(
-        "rounded-xl border border-line bg-surface p-3 transition-colors hover:border-[#c0c4dc]",
+        "rounded-xl border border-line bg-surface p-3 transition-colors hover:border-[#cdbf9f]",
         !readOnly && "cursor-grab active:cursor-grabbing",
         dragging && "opacity-40"
       )}

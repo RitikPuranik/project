@@ -3,19 +3,19 @@
 @import "@fontsource-variable/instrument-sans";
 
 @theme inline {
-  --color-paper: #f4f5f9;
-  --color-surface: #ffffff;
-  --color-ink: #181b33;
-  --color-muted: #5f6484;
-  --color-faint: #8b90ab;
-  --color-line: #e1e3ee;
-  --color-wash: #eceef6;
-  --color-accent: #0a7c72;
-  --color-accent-strong: #08665e;
-  --color-accent-wash: #e0f2f0;
-  --color-danger: #c62f3e;
-  --color-danger-wash: #fbe8ea;
-  --color-amber-wash: #fcf0d9;
+  --color-paper: #f2ebdd;
+  --color-surface: #fbf8f1;
+  --color-ink: #25301f;
+  --color-muted: #667060;
+  --color-faint: #8f9884;
+  --color-line: #ddd2bb;
+  --color-wash: #ebe2cf;
+  --color-accent: #3a7d4f;
+  --color-accent-strong: #2b6540;
+  --color-accent-wash: #dde9d6;
+  --color-danger: #b0412c;
+  --color-danger-wash: #f5ddd4;
+  --color-amber-wash: #f2e3bd;
   --font-sans: "Instrument Sans Variable", ui-sans-serif, system-ui, sans-serif;
   --font-display: "Bricolage Grotesque Variable", "Instrument Sans Variable", ui-sans-serif, sans-serif;
 }
@@ -81,4 +81,14 @@ input:focus-visible,
 select:focus-visible,
 textarea:focus-visible {
   outline: none;
+}
+
+::selection {
+  background: #c9dcc1;
+  color: var(--color-ink);
+}
+
+/* Warm, quiet scrollbars to match the beige surfaces. */
+* {
+  scrollbar-color: #cdbf9f transparent;
 }

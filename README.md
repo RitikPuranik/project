@@ -23,6 +23,36 @@ A modern, responsive full-stack project and task management system built with Ex
 
 ---
 
+## 🆕 Workspace additions (ported from the Planora project)
+
+| Area | What was added |
+|---|---|
+| **Dashboard** | Time-of-day greeting, four stat cards (active projects, total tasks, completed, people), a task-progress ring and a link to *My tasks* |
+| **My tasks** (`/my-tasks`) | Every task assigned to you across all projects, grouped *Overdue / Due this week / Later / No due date / Completed*, with Open / Done / All view, project + priority filters and an inline stage dropdown (version-checked, so a stale edit still returns 409) |
+| **Team** (`/team`) | Directory of everyone you share a project with, their role and the projects you have in common, with search |
+| **Projects list** | Active / Archived / All filter with counts, status pill, member count on each card |
+| **Project page** | Metrics strip (status, task count, completed x / y and %, project manager) that refreshes whenever a task changes; admins can choose **Delete permanently** (removes the project, its tasks and comments) instead of the default soft delete |
+| **Project team tab** | "Add a member" now lists every eligible person straight away (searchable) via `available-members`, with their global role |
+| **Users (admin)** | Projects and Tasks columns per user |
+| **Shell** | Grouped sidebar (Workspace / Administration / Account), breadcrumb, *Quick tips* card; dev-only one-click demo accounts on the sign-in page |
+
+New / extended API (all backward compatible; lists remain plain arrays):
+
+| Endpoint | Notes |
+|---|---|
+| `GET /api/tasks/mine` | Tasks assigned to the caller across accessible projects; `project` is `{ _id, name, columns, isArchived }` |
+| `GET /api/projects/:id/members` | Owner + members with project roles (any participant) |
+| `GET /api/projects/:id/available-members?search=` | Active, non-admin users not yet on the project (managers/admin only) |
+| `GET /api/projects?search=&status=active\|archived` | Name search and status filter (the older `?archived=` still works) |
+| `GET /api/projects/:id/tasks?search=&assignee=none&columnId=` | Text search over title/description, unassigned filter, column filter |
+| `?page=&limit=` on project and task lists | Opt-in paging; totals in `X-Total-Count`, `X-Total-Pages`, `X-Page`, `X-Limit` response headers |
+| `GET /api/users?counts=true` | Admin only: adds `projectCount` and `taskCount` per user |
+| `DELETE /api/projects/:id?permanent=true` | Admin only: hard delete of the project and its tasks |
+| `PUT /api/tasks/:id/move` | `order` is now optional; omit it to append the task to the end of the column |
+| `GET /api/health` | Now reports the database state (`503` when MongoDB is disconnected) |
+
+---
+
 ## ✉️ Email (EmailJS)
 
 All emails (OTP codes, forgot password, welcome, password-changed, verification) are sent from the **backend** through one EmailJS template.

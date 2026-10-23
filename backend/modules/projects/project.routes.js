@@ -10,6 +10,8 @@ import {
   addMember,
   removeMember,
   updateMemberRole,
+  getMembers,
+  getAvailableMembers,
 } from "./project.controller.js";
 import { protect, authorize, blockViewerWrites } from "../../shared/middleware/auth.js";
 import { projectAccessParam, blockArchivedWrites } from "./project.access.js";
@@ -26,6 +28,8 @@ router.route("/").post(authorize("admin"), createProject).get(getProjects);
 router.route("/:id").get(getProject).put(blockArchivedWrites, updateProject).delete(deleteProject);
 router.put("/:id/archive", archiveProject);
 router.post("/:id/clone", authorize("admin", "project_manager"), cloneProject);
+router.get("/:id/members", getMembers);
+router.get("/:id/available-members", getAvailableMembers);
 router.post("/:id/members", blockArchivedWrites, addMember);
 router.put("/:id/members/:userId/role", blockArchivedWrites, updateMemberRole);
 router.delete("/:id/members/:userId", blockArchivedWrites, removeMember);

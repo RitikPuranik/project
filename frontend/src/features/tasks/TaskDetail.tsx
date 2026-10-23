@@ -102,7 +102,7 @@ export default function TaskDetail() {
               {task.subtasks.map((s) => (
                 <li key={s._id}>
                   <label className="flex cursor-pointer items-center gap-3 rounded-lg px-1 py-1.5 text-sm hover:bg-paper">
-                    <input type="checkbox" checked={s.done} disabled={!work} onChange={() => act(() => api.put(`${base}/subtasks/${s._id}`, { version: task.version }))} className="size-4 accent-[#0a7c72]" />
+                    <input type="checkbox" checked={s.done} disabled={!work} onChange={() => act(() => api.put(`${base}/subtasks/${s._id}`, { version: task.version }))} className="size-4 accent-[#3a7d4f]" />
                     <span className={cx(s.done && "text-muted line-through")}>{s.title}</span>
                   </label>
                 </li>

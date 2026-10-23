@@ -4,6 +4,7 @@ import Task from "../tasks/task.model.js";
 import User from "../users/user.model.js";
 import { getProjectRole } from "./project.access.js";
 import { PROJECT_ROLES } from "../../shared/constants/roles.js";
+import { escapeRegex, parsePagination, setPageHeaders } from "../../shared/utils/http.js";
 
 // Admin, or a project manager of *this* project (owner / assigned PM who also holds the
 // global Project Manager role). Same rule the task controller uses via req.projectRole.
@@ -60,6 +61,8 @@ export const createProject = async (req, res) => {
 };
 
 // @route GET /api/projects  (projects the user owns or is a member of)
+// Optional filters: ?search=<name>  ?status=active|archived (or ?archived=true|false)
+// Optional paging:  ?page=&limit=  (totals come back in X-Total-* headers; body stays an array)
 export const getProjects = async (req, res) => {
   try {
     const filter = {
@@ -68,16 +71,24 @@ export const getProjects = async (req, res) => {
     };
     // Admins can see everything
     const query = req.user.role === "admin" ? { isDeleted: false } : filter;
-    // Optional ?archived=true|false narrows to archived / active projects (default: both).
-    if (req.query.archived === "true") query.isArchived = true;
-    else if (req.query.archived === "false") query.isArchived = { $ne: true };
+    const status = String(req.query.status ?? "").toLowerCase();
+    if (req.query.archived === "true" || status === "archived") query.isArchived = true;
+    else if (req.query.archived === "false" || status === "active") query.isArchived = { $ne: true };
 
-    const projects = await Project.find(query)
-      .populate("owner", "name email avatar")
-      .populate("members.user", "name email avatar")
+    const search = typeof req.query.search === "string" ? req.query.search.trim().slice(0, 100) : "";
+    if (search) query.name = new RegExp(escapeRegex(search), "i");
+
+    const paging = parsePagination(req, { defaultLimit: 12, maxLimit: 50 });
+    let find = Project.find(query)
+      .populate("owner", "name email avatar role")
+      .populate("members.user", "name email avatar role")
       .sort({ createdAt: -1 });
+    if (paging) {
+      setPageHeaders(res, paging, await Project.countDocuments(query));
+      find = find.skip(paging.skip).limit(paging.limit);
+    }
 
-    res.json(projects);
+    res.json(await find);
   } catch (err) {
     res.status(500).json({ message: "Failed to fetch projects", error: err.message });
   }
@@ -87,8 +98,8 @@ export const getProjects = async (req, res) => {
 export const getProject = async (req, res) => {
   try {
     const project = await Project.findOne({ _id: req.params.id, isDeleted: false })
-      .populate("owner", "name email avatar")
-      .populate("members.user", "name email avatar");
+      .populate("owner", "name email avatar role")
+      .populate("members.user", "name email avatar role");
 
     if (!project) return res.status(404).json({ message: "Project not found" });
     res.json(project);
@@ -132,7 +143,7 @@ export const updateProject = async (req, res) => {
   }
 };
 
-// @route DELETE /api/projects/:id  (soft delete)
+// @route DELETE /api/projects/:id  (soft delete; ?permanent=true removes the project and its tasks for good)
 export const deleteProject = async (req, res) => {
   try {
     const project = await Project.findById(req.params.id);
@@ -140,6 +151,12 @@ export const deleteProject = async (req, res) => {
 
     if (req.user.role !== "admin") {
       return forbidden(res, "Only an admin can delete a project");
+    }
+
+    if (req.query.permanent === "true") {
+      await Task.deleteMany({ project: project._id });
+      await Project.deleteOne({ _id: project._id });
+      return res.json({ message: "Project permanently deleted" });
     }
 
     project.isDeleted = true;
@@ -352,5 +369,44 @@ export const updateMemberRole = async (req, res) => {
     res.json(project);
   } catch (err) {
     res.status(500).json({ message: "Failed to update member role", error: err.message });
+  }
+};
+
+// @route GET /api/projects/:id/members
+// Owner + members with their effective project roles (anyone who can see the project).
+export const getMembers = async (req, res) => {
+  try {
+    const project = await Project.findOne({ _id: req.params.id, isDeleted: false })
+      .populate("owner", "name email avatar role isActive")
+      .populate("members.user", "name email avatar role isActive");
+    if (!project) return res.status(404).json({ message: "Project not found" });
+    res.json({
+      owner: project.owner,
+      members: project.members.map((m) => ({ user: m.user, role: m.role })),
+    });
+  } catch (err) {
+    res.status(500).json({ message: "Failed to fetch members", error: err.message });
+  }
+};
+
+// @route GET /api/projects/:id/available-members
+// Active users a manager could still add to this project (not already on it, never admins).
+export const getAvailableMembers = async (req, res) => {
+  try {
+    const project = await Project.findOne({ _id: req.params.id, isDeleted: false }).select("owner members");
+    if (!project) return res.status(404).json({ message: "Project not found" });
+    if (!canManageProject(req.user, project)) return forbidden(res, "Not authorized to manage members");
+
+    const taken = [project.owner, ...project.members.map((m) => m.user)];
+    const search = typeof req.query.search === "string" ? req.query.search.trim().slice(0, 100) : "";
+    const filter = { _id: { $nin: taken }, role: { $ne: "admin" }, isActive: { $ne: false } };
+    if (search) {
+      const rx = new RegExp(escapeRegex(search), "i");
+      filter.$or = [{ name: rx }, { email: rx }];
+    }
+    const users = await User.find(filter).select("name email role avatar isActive").sort({ name: 1 }).limit(100);
+    res.json(users);
+  } catch (err) {
+    res.status(500).json({ message: "Failed to fetch available members", error: err.message });
   }
 };

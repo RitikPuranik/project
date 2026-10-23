@@ -16,26 +16,25 @@ export default function Team() {
   const [q, setQ] = useState("");
   const [results, setResults] = useState<Person[]>([]);
   const [role, setRole] = useState<"member" | "project_manager" | "viewer">("member");
-  const memberIds = new Set([project.owner._id, ...project.members.map((m) => m.user._id)]);
 
+  // Everyone a manager could still add (active, not an admin, not already on the project).
   useEffect(() => {
-    if (!canManage || q.trim().length < 2) {
+    if (!canManage) {
       setResults([]);
       return;
     }
     let alive = true;
     const t = setTimeout(() => {
       api
-        .get<Person[]>("/users", { params: { search: q.trim() } })
-        .then((r) => alive && setResults(r.data.filter((u) => !memberIds.has(u._id))))
+        .get<Person[]>(`/projects/${project._id}/available-members`, { params: q.trim() ? { search: q.trim() } : {} })
+        .then((r) => alive && setResults(r.data))
         .catch(() => alive && setResults([]));
-    }, 250);
+    }, q ? 250 : 0);
     return () => {
       alive = false;
       clearTimeout(t);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q, canManage, project]);
+  }, [q, canManage, project._id, project.members.length]);
 
   async function add(u: Person) {
     try {
@@ -109,14 +108,14 @@ export default function Team() {
         <section aria-labelledby="add-h" className="h-fit rounded-2xl border border-line bg-surface p-5">
           <h2 id="add-h" className="text-lg font-semibold">Add a member</h2>
           <div className="mt-4 flex flex-col gap-3">
-            <Input type="search" aria-label="Search people" placeholder="Search by name or email" value={q} onChange={(e) => setQ(e.target.value)} />
+            <Input type="search" aria-label="Search people" placeholder="Search people to add" value={q} onChange={(e) => setQ(e.target.value)} />
             <Select aria-label="Role in this project" value={role} onChange={(e) => setRole(e.target.value as typeof role)}>
               <option value="member">Member</option>
               <option value="viewer">Viewer (read-only)</option>
               {isAdmin && <option value="project_manager">Project manager</option>}
             </Select>
           </div>
-          <ul className="mt-3 flex flex-col">
+          <ul className="mt-3 flex max-h-80 flex-col overflow-y-auto">
             {results.map((u) => (
               <li key={u._id} className="flex items-center gap-3 py-2">
                 <Avatar person={u} size={30} />
@@ -124,10 +123,11 @@ export default function Team() {
                   <p className="truncate text-sm font-medium">{u.name}</p>
                   <p className="truncate text-xs text-muted">{u.email}</p>
                 </div>
+                {u.role && <RoleBadge role={u.role} />}
                 <Button size="sm" variant="primary" onClick={() => add(u)}>Add</Button>
               </li>
             ))}
-            {q.trim().length >= 2 && results.length === 0 && <li className="py-3 text-sm text-muted">No one new matches “{q}”.</li>}
+            {results.length === 0 && <li className="py-3 text-sm text-muted">{q.trim() ? `No one new matches “${q}”.` : "Everyone eligible is already on this project."}</li>}
           </ul>
         </section>
       ) : (

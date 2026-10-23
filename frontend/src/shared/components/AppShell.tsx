@@ -3,7 +3,7 @@ import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { useAuth } from "@/features/auth/auth";
 import { ROLE_LABEL } from "@/shared/lib/format";
-import { Avatar, Logo, PageLoader, cx } from "@/shared/components/ui";
+import { Avatar, Button, Logo, Modal, PageLoader, cx } from "@/shared/components/ui";
 
 const icon = (d: string) => (
   <svg viewBox="0 0 20 20" className="size-[18px]" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
@@ -11,18 +11,49 @@ const icon = (d: string) => (
   </svg>
 );
 
-const NAV = [
-  { href: "/dashboard", label: "Dashboard", icon: icon("M3 10.5 10 4l7 6.5M5 9v7h10V9") },
-  { href: "/projects", label: "Projects", icon: icon("M3 6a1 1 0 0 1 1-1h4l1.5 2H16a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6Z") },
-  { href: "/users", label: "Users", icon: icon("M7.5 9a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5ZM2.5 16c0-2.5 2.2-4 5-4s5 1.5 5 4M14 9.2a2.2 2.2 0 1 0 0-4.4M15 12.2c1.5.4 2.5 1.6 2.5 3.8"), admin: true },
-  { href: "/profile", label: "Profile", icon: icon("M10 10a3.2 3.2 0 1 0 0-6.4A3.2 3.2 0 0 0 10 10ZM3.8 16.5c.6-2.6 3-4 6.2-4s5.6 1.4 6.2 4") },
+interface NavItem {
+  href: string;
+  label: string;
+  icon: React.ReactNode;
+  admin?: boolean;
+}
+
+const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
+  {
+    label: "Workspace",
+    items: [
+      { href: "/dashboard", label: "Dashboard", icon: icon("M3 10.5 10 4l7 6.5M5 9v7h10V9") },
+      { href: "/projects", label: "Projects", icon: icon("M3 6a1 1 0 0 1 1-1h4l1.5 2H16a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6Z") },
+      { href: "/my-tasks", label: "My tasks", icon: icon("M4 10.5 8 14.5 16 5.5") },
+      { href: "/team", label: "Team", icon: icon("M7.5 9a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5ZM2.5 16c0-2.5 2.2-4 5-4s5 1.5 5 4M14 9.2a2.2 2.2 0 1 0 0-4.4M15 12.2c1.5.4 2.5 1.6 2.5 3.8") },
+    ],
+  },
+  {
+    label: "Administration",
+    items: [{ href: "/users", label: "Users", icon: icon("M10 3 4 5.5v4.4c0 3.4 2.4 5.9 6 7.1 3.6-1.2 6-3.7 6-7.1V5.5L10 3Z"), admin: true }],
+  },
+  {
+    label: "Account",
+    items: [{ href: "/profile", label: "Profile", icon: icon("M10 10a3.2 3.2 0 1 0 0-6.4A3.2 3.2 0 0 0 10 10ZM3.8 16.5c.6-2.6 3-4 6.2-4s5.6 1.4 6.2 4") }],
+  },
 ];
+
+const TIPS = [
+  ["Create a project", "Admins start a project and can pick its project manager right away."],
+  ["Add your team", "On a project's Team tab, managers add people as members or read-only viewers."],
+  ["Plan the work", "Add tasks, set priority and due dates, and assign them. Drag cards across the board as they progress."],
+  ["Stay on top of it", "“My tasks” gathers everything assigned to you, grouped by what's due first."],
+];
+
+const crumbOf = (pathname: string) =>
+  pathname.startsWith("/projects/") ? "Project" : pathname.startsWith("/tasks/") ? "Task" : NAV_GROUPS.flatMap((g) => g.items).find((n) => pathname.startsWith(n.href))?.label ?? "Workspace";
 
 export function AppShell() {
   const { user, status, logout } = useAuth();
   const navigate = useNavigate();
   const pathname = useLocation().pathname;
   const [open, setOpen] = useState(false);
+  const [tips, setTips] = useState(false);
 
   useEffect(() => {
     if (status === "anon") navigate("/login", { replace: true });
@@ -41,25 +72,44 @@ export function AppShell() {
   }
 
   const nav = (
-    <nav aria-label="Main" className="flex flex-col gap-1">
-      {NAV.filter((n) => !n.admin || user.role === "admin").map((n) => {
-        const active = pathname === n.href || pathname.startsWith(n.href + "/");
+    <nav aria-label="Main" className="flex flex-col gap-5">
+      {NAV_GROUPS.map((group) => {
+        const items = group.items.filter((n) => !n.admin || user.role === "admin");
+        if (items.length === 0) return null;
         return (
-          <Link
-            key={n.href}
-            to={n.href}
-            aria-current={active ? "page" : undefined}
-            className={cx(
-              "flex h-10 items-center gap-3 rounded-[9px] px-3 text-sm font-medium transition-colors",
-              active ? "bg-accent-wash text-accent-strong" : "text-muted hover:bg-wash hover:text-ink"
-            )}
-          >
-            {n.icon}
-            {n.label}
-          </Link>
+          <div key={group.label} className="flex flex-col gap-1">
+            <p className="px-3 pb-1 text-[11px] font-semibold tracking-wider text-faint uppercase">{group.label}</p>
+            {items.map((n) => {
+              const active = pathname === n.href || pathname.startsWith(n.href + "/");
+              return (
+                <Link
+                  key={n.href}
+                  to={n.href}
+                  aria-current={active ? "page" : undefined}
+                  className={cx(
+                    "flex h-10 items-center gap-3 rounded-[9px] px-3 text-sm font-medium transition-colors",
+                    active ? "bg-accent-wash text-accent-strong" : "text-muted hover:bg-wash hover:text-ink"
+                  )}
+                >
+                  {n.icon}
+                  {n.label}
+                </Link>
+              );
+            })}
+          </div>
         );
       })}
     </nav>
+  );
+
+  const helpCard = (
+    <div className="rounded-xl bg-wash p-4">
+      <p className="text-sm font-semibold">Need a hand?</p>
+      <p className="mt-0.5 text-xs text-muted">A quick tour of how Orbin fits together.</p>
+      <button type="button" onClick={() => setTips(true)} className="mt-2 text-xs font-semibold text-accent-strong hover:underline">
+        Quick tips →
+      </button>
+    </div>
   );
 
   const account = (
@@ -90,7 +140,10 @@ export function AppShell() {
           </Link>
           {nav}
         </div>
-        {account}
+        <div className="flex flex-col gap-4">
+          {helpCard}
+          {account}
+        </div>
       </aside>
 
       {/* mobile bar */}
@@ -114,7 +167,7 @@ export function AppShell() {
       {open && (
         <div className="fixed inset-0 z-40 lg:hidden">
           <div className="absolute inset-0 bg-ink/40" onClick={() => setOpen(false)} aria-hidden />
-          <aside className="pop-in absolute inset-y-0 left-0 flex w-72 flex-col justify-between bg-surface p-4">
+          <aside className="pop-in absolute inset-y-0 left-0 flex w-72 flex-col justify-between overflow-y-auto bg-surface p-4">
             <div className="flex flex-col gap-8">
               <div className="flex items-center gap-2.5 px-2 pt-1">
                 <Logo />
@@ -122,15 +175,41 @@ export function AppShell() {
               </div>
               {nav}
             </div>
-            {account}
+            <div className="flex flex-col gap-4">
+              {helpCard}
+              {account}
+            </div>
           </aside>
         </div>
       )}
 
       <main className="min-w-0 px-4 py-6 sm:px-8 sm:py-8">
-        <div className="mx-auto w-full max-w-[1280px]"><Outlet />
+        <div className="mx-auto w-full max-w-[1280px]">
+          <p className="mb-5 hidden items-center gap-2 text-sm text-muted lg:flex" aria-label="Breadcrumb">
+            <span>Workspace</span>
+            <span aria-hidden>/</span>
+            <span className="font-medium text-ink">{crumbOf(pathname)}</span>
+          </p>
+          <Outlet />
         </div>
       </main>
+
+      <Modal open={tips} onClose={() => setTips(false)} title="Quick tips" width="max-w-md">
+        <ol className="flex flex-col gap-4">
+          {TIPS.map(([title, body], i) => (
+            <li key={title} className="flex gap-3">
+              <span className="grid size-6 shrink-0 place-items-center rounded-full bg-accent-wash text-xs font-semibold text-accent-strong">{i + 1}</span>
+              <div>
+                <p className="text-sm font-medium">{title}</p>
+                <p className="text-sm text-muted">{body}</p>
+              </div>
+            </li>
+          ))}
+        </ol>
+        <div className="mt-6 flex justify-end">
+          <Button variant="primary" onClick={() => setTips(false)}>Got it</Button>
+        </div>
+      </Modal>
     </div>
   );
 }

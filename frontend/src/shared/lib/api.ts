@@ -11,8 +11,15 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
+/** Fired after any successful task write, so stat strips elsewhere on the page can refetch. */
+export const TASKS_CHANGED = "orbin:tasks-changed";
+
 api.interceptors.response.use(
-  (res) => res,
+  (res) => {
+    const method = (res.config.method ?? "get").toLowerCase();
+    if (method !== "get" && /\/tasks(\/|$)/.test(res.config.url ?? "")) window.dispatchEvent(new Event(TASKS_CHANGED));
+    return res;
+  },
   async (error) => {
     const original = error.config;
     if (error.response?.status === 403 && error.response?.data?.code === "ACCOUNT_DEACTIVATED") {

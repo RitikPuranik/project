@@ -4,10 +4,10 @@ export const PRIORITIES: Priority[] = ["low", "medium", "high", "critical"];
 export const TYPES: TaskType[] = ["task", "feature", "improvement", "bug"];
 
 export const PRIORITY_COLOR: Record<Priority, string> = {
-  low: "#8A90A8",
-  medium: "#3F6FD8",
-  high: "#E0661A",
-  critical: "#C62F3E",
+  low: "#a39a85",
+  medium: "#6f9a5a",
+  high: "#c98a2b",
+  critical: "#b0412c",
 };
 
 export const ROLE_LABEL: Record<Role, string> = {
@@ -29,8 +29,8 @@ export function canEdit(user: Person | null): boolean {
   return !!user && user.role !== "viewer";
 }
 
-const STAGE_PALETTE = ["#64708C", "#D98A06", "#7A4FD6"];
-const STAGE_DONE = "#0A7C72";
+const STAGE_PALETTE = ["#a39a85", "#c98a2b", "#8a6f4d"];
+const STAGE_DONE = "#3a7d4f";
 
 export function sortedColumns(project: Pick<Project, "columns">): Column[] {
   return [...project.columns].sort((a, b) => a.order - b.order);
@@ -41,7 +41,7 @@ export function stageColor(index: number, total: number): string {
   return STAGE_PALETTE[index % STAGE_PALETTE.length];
 }
 
-export function isDone(task: Task, project: Pick<Project, "columns">): boolean {
+export function isDone(task: Pick<Task, "columnId">, project: Pick<Project, "columns">): boolean {
   const cols = sortedColumns(project);
   return cols.length > 0 && task.columnId === cols[cols.length - 1].id;
 }
@@ -206,4 +206,14 @@ export function taskFields(t: Task): TaskFields {
 /** Keys whose values differ between two field sets. */
 export function differingFields(a: TaskFields, b: TaskFields): (keyof TaskFields)[] {
   return (Object.keys(a) as (keyof TaskFields)[]).filter((k) => JSON.stringify(a[k]) !== JSON.stringify(b[k]));
+}
+
+export function greeting(date = new Date()): string {
+  const h = date.getHours();
+  return h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening";
+}
+
+/** Whole-number completion percentage (0 when there is nothing to complete). */
+export function percent(done: number, total: number): number {
+  return total > 0 ? Math.round((done / total) * 100) : 0;
 }

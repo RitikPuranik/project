@@ -8,6 +8,7 @@ import {
   deleteTask,
   addSubtask,
   toggleSubtask,
+  getMyTasks,
 } from "./task.controller.js";
 import { protect, blockViewerWrites } from "../../shared/middleware/auth.js";
 import { taskAccessParam, blockArchivedWrites } from "../projects/project.access.js";
@@ -20,6 +21,7 @@ router.use(blockViewerWrites);
 router.param("id", taskAccessParam);
 
 router.route("/").post(blockArchivedWrites, createTask).get(getTasks);
+router.get("/mine", getMyTasks); // all tasks assigned to the caller (before the /:id routes)
 router.use("/:id", blockArchivedWrites); // tasks (and their comments) of archived projects are read-only
 router.route("/:id").get(getTask).put(updateTask).delete(deleteTask);
 router.put("/:id/move", moveTask);

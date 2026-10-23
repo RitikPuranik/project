@@ -13,7 +13,7 @@ const VARIANTS: Record<Variant, string> = {
   primary: "bg-accent text-white hover:bg-accent-strong disabled:bg-accent/50",
   secondary: "bg-surface text-ink border border-line hover:bg-wash disabled:text-faint",
   ghost: "text-muted hover:bg-wash hover:text-ink disabled:text-faint",
-  danger: "bg-danger text-white hover:bg-[#a82532] disabled:bg-danger/50",
+  danger: "bg-danger text-white hover:bg-[#8f3321] disabled:bg-danger/50",
 };
 
 export function buttonClass(variant: Variant = "secondary", size: "sm" | "md" = "md", extra?: string) {
@@ -73,7 +73,7 @@ export function LinkButton({
 /* ---------- Form fields ---------- */
 
 const fieldBase =
-  "rounded-[9px] border border-line bg-surface px-3 text-sm text-ink placeholder:text-faint transition-colors hover:border-[#c9cce0] focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20 disabled:bg-wash disabled:text-faint";
+  "rounded-[9px] border border-line bg-surface px-3 text-sm text-ink placeholder:text-faint transition-colors hover:border-[#cdbf9f] focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20 disabled:bg-wash disabled:text-faint";
 
 export function Field({
   label,
@@ -157,7 +157,7 @@ export function EmptyState({
   action?: React.ReactNode;
 }) {
   return (
-    <div className="flex flex-col items-center gap-2 rounded-2xl border border-dashed border-[#c9cce0] px-6 py-14 text-center">
+    <div className="flex flex-col items-center gap-2 rounded-2xl border border-dashed border-[#cdbf9f] px-6 py-14 text-center">
       <h3 className="text-lg font-semibold">{title}</h3>
       {body && <p className="max-w-sm text-sm text-muted">{body}</p>}
       {action && <div className="mt-3">{action}</div>}
@@ -271,6 +271,7 @@ export function ConfirmModal({
   confirmLabel,
   onConfirm,
   onClose,
+  children,
 }: {
   open: boolean;
   title: string;
@@ -278,11 +279,13 @@ export function ConfirmModal({
   confirmLabel: string;
   onConfirm: () => Promise<void> | void;
   onClose: () => void;
+  children?: React.ReactNode;
 }) {
   const [busy, setBusy] = useState(false);
   return (
     <Modal open={open} onClose={onClose} title={title} width="max-w-md">
       <p className="text-sm text-muted">{body}</p>
+      {children}
       <div className="mt-6 flex justify-end gap-2">
         <Button variant="ghost" onClick={onClose}>
           Cancel
@@ -308,8 +311,8 @@ export function ConfirmModal({
 
 /* ---------- People ---------- */
 
-const AVATAR_TONES = ["#dfe5fb", "#f6e3d3", "#e2f0e4", "#efe1f3", "#f3ecd0", "#d9eef2"];
-const AVATAR_INK = ["#2c3e96", "#8a4a1c", "#1f6a35", "#6a2f7e", "#7a6212", "#17606f"];
+const AVATAR_TONES = ["#e3ead6", "#f1e3c8", "#dfe9dc", "#efe2d3", "#ece6c9", "#d9e6dd"];
+const AVATAR_INK = ["#3a5a2c", "#7a5223", "#2b6540", "#7a4a2b", "#6b5a14", "#2f5f4a"];
 
 export function Avatar({ person, size = 28 }: { person: Pick<Person, "_id" | "name">; size?: number }) {
   const i = useMemo(() => [...person.name].reduce((h, c) => h + c.charCodeAt(0), 0) % AVATAR_TONES.length, [person.name]);
@@ -364,7 +367,7 @@ export function PriorityBadge({ priority }: { priority: Priority }) {
 const TYPE_TONE: Record<TaskType, string> = {
   bug: "bg-danger-wash text-danger",
   feature: "bg-accent-wash text-accent-strong",
-  improvement: "bg-[#e8e4fa] text-[#5a3fb8]",
+  improvement: "bg-[#efe3c8] text-[#7a5223]",
   task: "bg-wash text-muted",
 };
 export function TypeBadge({ type }: { type: TaskType }) {
@@ -461,9 +464,108 @@ export function PageHeader({
 export function Logo({ size = 26 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 32 32" fill="none" aria-hidden>
-      <ellipse cx="16" cy="16" rx="13" ry="6.5" transform="rotate(-28 16 16)" stroke="#0a7c72" strokeWidth="2.2" />
-      <circle cx="16" cy="16" r="4.6" fill="#181b33" />
-      <circle cx="26.2" cy="10.2" r="2.4" fill="#0a7c72" />
+      <ellipse cx="16" cy="16" rx="13" ry="6.5" transform="rotate(-28 16 16)" stroke="#3a7d4f" strokeWidth="2.2" />
+      <circle cx="16" cy="16" r="4.6" fill="#25301f" />
+      <circle cx="26.2" cy="10.2" r="2.4" fill="#3a7d4f" />
     </svg>
+  );
+}
+
+/* ---------- Dashboard / filter widgets ---------- */
+
+export function StatCard({
+  label,
+  value,
+  hint,
+  tone = "accent",
+  progress,
+}: {
+  label: string;
+  value: React.ReactNode;
+  hint?: React.ReactNode;
+  tone?: "accent" | "blue" | "amber" | "violet";
+  progress?: number;
+}) {
+  const bar = { accent: "#3a7d4f", blue: "#6f9a5a", amber: "#c98a2b", violet: "#8a6f4d" }[tone];
+  return (
+    <article className="rounded-2xl border border-line bg-surface p-5">
+      <p className="text-sm text-muted">{label}</p>
+      <p className="font-display mt-1 text-[34px] leading-none font-semibold tabular-nums">{value}</p>
+      {hint && <p className="mt-2 text-xs text-muted">{hint}</p>}
+      {progress !== undefined && (
+        <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-wash" role="img" aria-label={`${progress}%`}>
+          <span className="block h-full rounded-full" style={{ width: `${progress}%`, background: bar }} />
+        </div>
+      )}
+    </article>
+  );
+}
+
+export function ProgressRing({ value, size = 150, label = "complete" }: { value: number; size?: number; label?: string }) {
+  const stroke = 12;
+  const r = (size - stroke) / 2;
+  const c = 2 * Math.PI * r;
+  return (
+    <div className="relative grid place-items-center" style={{ width: size, height: size }} role="img" aria-label={`${value}% ${label}`}>
+      <svg width={size} height={size} className="-rotate-90" aria-hidden>
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="#ebe2cf" strokeWidth={stroke} />
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={r}
+          fill="none"
+          stroke="#3a7d4f"
+          strokeWidth={stroke}
+          strokeLinecap="round"
+          strokeDasharray={c}
+          strokeDashoffset={c * (1 - Math.min(100, Math.max(0, value)) / 100)}
+          style={{ transition: "stroke-dashoffset 400ms ease" }}
+        />
+      </svg>
+      <div className="absolute text-center">
+        <p className="font-display text-3xl leading-none font-semibold tabular-nums">{value}%</p>
+        <p className="mt-1 text-xs text-muted">{label}</p>
+      </div>
+    </div>
+  );
+}
+
+export function Segmented<T extends string>({
+  value,
+  onChange,
+  options,
+  label,
+}: {
+  value: T;
+  onChange: (v: T) => void;
+  options: { value: T; label: string; count?: number }[];
+  label: string;
+}) {
+  return (
+    <div role="group" aria-label={label} className="inline-flex rounded-[10px] bg-wash p-0.5">
+      {options.map((o) => (
+        <button
+          key={o.value}
+          type="button"
+          aria-pressed={value === o.value}
+          onClick={() => onChange(o.value)}
+          className={cx(
+            "h-8 rounded-[8px] px-3 text-sm font-medium transition-colors",
+            value === o.value ? "bg-surface text-ink shadow-sm" : "text-muted hover:text-ink"
+          )}
+        >
+          {o.label}
+          {o.count !== undefined && <span className="ml-1.5 text-xs text-faint">{o.count}</span>}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+export function StatusPill({ archived }: { archived: boolean }) {
+  return (
+    <span className={cx("rounded-full px-2.5 py-0.5 text-xs font-medium", archived ? "bg-amber-wash text-[#8a5a00]" : "bg-accent-wash text-accent-strong")}>
+      {archived ? "Archived" : "Active"}
+    </span>
   );
 }

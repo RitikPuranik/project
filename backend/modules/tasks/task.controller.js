@@ -1,9 +1,10 @@
 import mongoose from "mongoose";
 import Task from "./task.model.js";
 import User from "../users/user.model.js";
+import Project from "../projects/project.model.js";
 import { projectParticipantIds } from "../projects/project.access.js";
 import { MANAGERS } from "../../shared/constants/roles.js";
-import { forbidden, serverError } from "../../shared/utils/http.js";
+import { escapeRegex, forbidden, parsePagination, serverError, setPageHeaders } from "../../shared/utils/http.js";
 
 /*
  * Authorization model (enforced here, on the server — the UI is only a convenience).
@@ -210,28 +211,76 @@ export const getTasks = async (req, res) => {
     if (!req.params.projectId) {
       return res.status(400).json({ message: "Use /api/projects/:projectId/tasks to list tasks" });
     }
-    const { assignee, priority, dueBefore, dueAfter, type, label } = req.query;
+    const { assignee, priority, dueBefore, dueAfter, type, label, columnId, search } = req.query;
 
     const filter = { project: req.project._id, isDeleted: false };
     // Coerce to strings so query-string objects (?assignee[$ne]=x) can't inject operators.
-    if (assignee) filter.assignees = String(assignee);
+    // ?assignee=none lists unassigned tasks.
+    if (assignee === "none") filter.assignees = { $size: 0 };
+    else if (assignee) filter.assignees = String(assignee);
     if (priority) filter.priority = String(priority);
     if (type) filter.type = String(type);
     if (label) filter.labels = String(label);
+    if (columnId) filter.columnId = String(columnId);
+    if (typeof search === "string" && search.trim()) {
+      const rx = new RegExp(escapeRegex(search.trim().slice(0, 100)), "i");
+      filter.$or = [{ title: rx }, { description: rx }];
+    }
     if (dueBefore || dueAfter) {
       filter.dueDate = {};
       if (dueBefore) filter.dueDate.$lte = new Date(String(dueBefore));
       if (dueAfter) filter.dueDate.$gte = new Date(String(dueAfter));
     }
 
-    const tasks = await Task.find(filter)
+    // Opt-in paging (?page=&limit=); totals come back in X-Total-* headers, body stays an array.
+    const paging = parsePagination(req, { defaultLimit: 50, maxLimit: 200 });
+    let find = Task.find(filter)
       .populate("assignees", "name email avatar")
       .populate("createdBy", "name email")
       .sort({ columnId: 1, order: 1 });
+    if (paging) {
+      setPageHeaders(res, paging, await Task.countDocuments(filter));
+      find = find.skip(paging.skip).limit(paging.limit);
+    }
 
-    res.json(tasks);
+    res.json(await find);
   } catch (err) {
     serverError(res, "Failed to fetch tasks", err);
+  }
+};
+
+// @route GET /api/tasks/mine
+// Every open or done task assigned to the caller, across all projects they can still access
+// (archived projects included, flagged so the UI can show them read-only). Each task carries
+// a slim `project` object ({ _id, name, columns, isArchived }) instead of the bare id.
+export const getMyTasks = async (req, res) => {
+  try {
+    const scope = { isDeleted: false };
+    if (req.user.role !== "admin") scope.$or = [{ owner: req.user._id }, { "members.user": req.user._id }];
+    const projects = await Project.find(scope).select("name columns isArchived");
+    const byId = new Map(projects.map((p) => [p._id.toString(), p]));
+    if (byId.size === 0) return res.json([]);
+
+    const tasks = await Task.find({
+      isDeleted: false,
+      assignees: req.user._id,
+      project: { $in: [...byId.keys()] },
+    })
+      .populate("assignees", "name email avatar")
+      .populate("createdBy", "name email")
+      .sort({ dueDate: 1, createdAt: -1 });
+
+    res.json(
+      tasks.map((t) => {
+        const p = byId.get(t.project.toString());
+        return {
+          ...t.toObject(),
+          project: { _id: p._id, name: p.name, columns: p.columns, isArchived: !!p.isArchived },
+        };
+      })
+    );
+  } catch (err) {
+    serverError(res, "Failed to fetch your tasks", err);
   }
 };
 
@@ -291,7 +340,7 @@ export const updateTask = async (req, res) => {
 };
 
 // @route PUT /api/tasks/:id/move  (drag-and-drop: change column and/or order)
-// Body: { columnId, order, version }
+// Body: { columnId, version, order? }  (order omitted = append to the end of the column)
 export const moveTask = async (req, res) => {
   try {
     if (!canWorkOnTask(req)) {
@@ -301,11 +350,18 @@ export const moveTask = async (req, res) => {
     if (version === null) return versionRequired(res);
     if ((req.task.version ?? 0) !== version) return conflict(res, req.task._id);
 
-    const { columnId, order } = req.body;
+    const { columnId } = req.body;
+    let { order } = req.body;
     if (!req.project.columns.some((c) => c.id === columnId)) {
       return res.status(400).json({ message: "Unknown column for this project" });
     }
-    if (typeof order !== "number" || !Number.isFinite(order)) {
+    if (order === undefined) {
+      // No position given (e.g. a status dropdown rather than drag-and-drop): go to the end.
+      const last = await Task.findOne({ project: req.project._id, columnId, isDeleted: false, _id: { $ne: req.task._id } })
+        .sort({ order: -1 })
+        .select("order");
+      order = last ? last.order + 1 : 0;
+    } else if (typeof order !== "number" || !Number.isFinite(order)) {
       return res.status(400).json({ message: "order must be a number" });
     }
 
