@@ -1,17 +1,17 @@
 import { Navigate, Route, Routes } from "react-router-dom";
-import { AppShell } from "./components/AppShell";
-import AuthLayout from "./components/AuthLayout";
-import Login from "./pages/Login";
-import Register from "./pages/Register";
-import Dashboard from "./pages/Dashboard";
-import Projects from "./pages/Projects";
-import ProjectLayout from "./pages/ProjectLayout";
-import Board from "./pages/Board";
-import ProjectTasks from "./pages/ProjectTasks";
-import Team from "./pages/Team";
-import TaskDetail from "./pages/TaskDetail";
-import Users from "./pages/Users";
-import Profile from "./pages/Profile";
+import { AppShell } from "@/shared/components/AppShell";
+import AuthLayout from "@/features/auth/AuthLayout";
+import Login from "@/features/auth/Login";
+import Register from "@/features/auth/Register";
+import Dashboard from "@/features/dashboard/Dashboard";
+import Projects from "@/features/projects/Projects";
+import ProjectLayout from "@/features/projects/ProjectLayout";
+import Board from "@/features/tasks/Board";
+import ProjectTasks from "@/features/tasks/ProjectTasks";
+import Team from "@/features/projects/Team";
+import TaskDetail from "@/features/tasks/TaskDetail";
+import Users from "@/features/users/Users";
+import Profile from "@/features/auth/Profile";
 
 export default function App() {
   return (

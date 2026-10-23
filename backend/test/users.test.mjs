@@ -6,10 +6,10 @@ import express from "express";
 process.env.JWT_SECRET = "test-secret-test-secret-test-secret";
 process.env.JWT_REFRESH_SECRET = "test-refresh-test-refresh-test-refresh";
 
-const { default: User } = await import("../models/User.js");
-const { default: userRoutes } = await import("../routes/userRoutes.js");
-const { default: authRoutes } = await import("../routes/authRoutes.js");
-const { generateAccessToken, generateRefreshToken } = await import("../utils/generateToken.js");
+const { default: User } = await import("../modules/users/user.model.js");
+const { default: userRoutes } = await import("../modules/users/user.routes.js");
+const { default: authRoutes } = await import("../modules/auth/auth.routes.js");
+const { generateAccessToken, generateRefreshToken } = await import("../shared/utils/token.js");
 
 const mk = (role, name) => {
   const u = new User({ name, email: `${name}@t.io`, password: "secret123", role });

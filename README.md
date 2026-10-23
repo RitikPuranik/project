@@ -18,6 +18,7 @@ A modern, responsive full-stack project and task management system built with Ex
 | **Concurrent edits** | Optimistic concurrency via a task `version` (409 on conflict, 428 if missing) with a conflict-resolution UI |
 | **Comments** | Add, read (with the task) and delete. Authors delete their own comments; admins and project managers can delete any; Viewers and non-participants can't comment or delete. 2000-character limit. Comments section with delete (and confirmation) on the task page |
 | **Dashboard & UI** | Dashboard, Kanban board with drag-and-drop, task list, task detail page, profile, role matrix |
+| **Code structure** | Modular on both sides: backend `modules/{auth,users,projects,tasks,comments}` and frontend `features/{auth,dashboard,users,projects,tasks,comments}`, with common code in `shared/` |
 | **Tests** | `cd backend && npm test` — authorization, concurrency and user-management regression tests (in-memory database fake, no MongoDB needed) |
 
 ---
@@ -26,26 +27,39 @@ A modern, responsive full-stack project and task management system built with Ex
 
 ```
 project/
-├── backend/            # Express.js REST API + MongoDB (Mongoose) + JWT Auth
-│   ├── config/         # Database connection & constants (roles, statuses)
-│   ├── controllers/    # Business logic (auth, projects, tasks, users)
-│   ├── middleware/     # Role-based access control (`protect`, `authorize`)
-│   ├── models/         # Mongoose schemas (User, Project, Task)
-│   ├── routes/         # Express API route handlers
-│   ├── utils/          # JWT token generation & helpers
-│   ├── .env.example    # Backend environment variable template
-│   ├── .gitignore      # Ignores .env and node_modules
+├── backend/                       # Express.js REST API + MongoDB (Mongoose) + JWT Auth
+│   ├── server.js                  # Boot only: env, database connection, listen
+│   ├── app.js                     # createApp(): middleware + module routes (reused by tests)
+│   ├── config/                    # Database connection
+│   ├── modules/                   # One folder per feature, each with its own model/controller/routes
+│   │   ├── index.js               # registerRoutes(): mounts every module under /api
+│   │   ├── auth/                  # auth.controller.js, auth.routes.js
+│   │   ├── users/                 # user.model.js, user.controller.js, user.routes.js
+│   │   ├── projects/              # project.model.js, project.controller.js, project.routes.js,
+│   │   │                          # project.access.js (project/task access guards)
+│   │   ├── tasks/                 # task.model.js, task.controller.js, task.routes.js
+│   │   └── comments/              # comment.controller.js, comment.routes.js (mounted under a task)
+│   ├── shared/                    # Code used by several modules
+│   │   ├── constants/             # roles.js (who may manage / comment)
+│   │   ├── middleware/            # auth.js (protect, authorize, blockViewerWrites), errorHandler.js
+│   │   └── utils/                 # token.js (JWT), http.js (forbidden, serverError)
+│   ├── test/                      # Authorization, concurrency and user-management tests
+│   ├── .env.example
 │   └── package.json
-└── frontend/           # React 19 + TypeScript + Vite + Tailwind CSS v4
+└── frontend/                      # React 19 + TypeScript + Vite + Tailwind CSS v4
     ├── src/
-    │   ├── components/ # Navbar, TaskModal, ProtectedRoute, etc.
-    │   ├── context/    # AuthContext with token state & persistence
-    │   ├── lib/        # Axios API client configured via environment variables
-    │   ├── pages/      # Dashboard, Projects, Board, Tasks, Team, Users, Profile
-    │   └── styles/     # Modern design system & typography
-    ├── .env            # Local frontend environment file (VITE_API_URL)
-    ├── .env.example    # Frontend environment variable template
-    ├── .gitignore      # Ignores local env and build artifacts
+    │   ├── main.tsx, App.tsx      # Entry point and routes
+    │   ├── features/              # One folder per feature (pages + components + context together)
+    │   │   ├── auth/              # Login, Register, Profile, AuthLayout, auth context
+    │   │   ├── dashboard/         # Dashboard
+    │   │   ├── users/             # Users page, UserForm, RoleMatrix
+    │   │   ├── projects/          # Projects, ProjectLayout, ProjectForm, Team, project context
+    │   │   ├── tasks/             # Board, ProjectTasks, TaskDetail, TaskForm, TaskCard
+    │   │   └── comments/          # CommentsSection (add / list / delete)
+    │   └── shared/                # Used by several features
+    │       ├── components/        # ui kit, AppShell
+    │       └── lib/               # api client, types, format & permission helpers, useFetch
+    ├── .env.example
     └── package.json
 ```
 

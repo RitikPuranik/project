@@ -12,13 +12,13 @@ import express from "express";
 process.env.JWT_SECRET = "test-secret-test-secret-test-secret";
 process.env.JWT_REFRESH_SECRET = "test-refresh-test-refresh-test-refresh";
 
-const { default: User } = await import("../models/User.js");
-const { default: Project } = await import("../models/Project.js");
-const { default: Task } = await import("../models/Task.js");
-const { default: authRoutes } = await import("../routes/authRoutes.js");
-const { default: projectRoutes } = await import("../routes/projectRoutes.js");
-const { default: taskRoutes } = await import("../routes/taskRoutes.js");
-const { generateAccessToken } = await import("../utils/generateToken.js");
+const { default: User } = await import("../modules/users/user.model.js");
+const { default: Project } = await import("../modules/projects/project.model.js");
+const { default: Task } = await import("../modules/tasks/task.model.js");
+const { default: authRoutes } = await import("../modules/auth/auth.routes.js");
+const { default: projectRoutes } = await import("../modules/projects/project.routes.js");
+const { default: taskRoutes } = await import("../modules/tasks/task.routes.js");
+const { generateAccessToken } = await import("../shared/utils/token.js");
 
 export { Task, Project, User };
 
