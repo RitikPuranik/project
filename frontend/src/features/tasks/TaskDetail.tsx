@@ -28,8 +28,9 @@ export default function TaskDetail() {
   if (error && !data) return <ErrorNote message={error} onRetry={reload} />;
   if (!data) return <PageLoader label="Loading task" />;
   const { task, project } = data;
-  const manage = canManageTasks(project, user);
-  const work = canWorkOnTask(project, user, task);
+  const archived = project.isArchived;
+  const manage = canManageTasks(project, user) && !archived;
+  const work = canWorkOnTask(project, user, task) && !archived;
   const cols = sortedColumns(project);
   const base = `/projects/${project._id}/tasks/${task._id}`;
   const due = dueLabel(task.dueDate);
@@ -63,7 +64,7 @@ export default function TaskDetail() {
   return (
     <>
       <Link to={`/projects/${project._id}`} className="mb-3 inline-block text-sm text-muted hover:text-ink">← {project.name}</Link>
-      {!editable && <ReadOnlyNote />}
+      {(!editable || archived) && <ReadOnlyNote>{archived ? "This project is archived and read-only. Unarchive it to make changes." : undefined}</ReadOnlyNote>}
       {stale && (
         <p role="status" className="mb-4 flex items-center justify-between gap-3 rounded-xl bg-amber-wash px-4 py-2.5 text-sm text-[#7a5200]">
           <span>Someone else changed this task, so your change wasn&apos;t applied. You&apos;re now looking at the latest version — review it and try again.</span>

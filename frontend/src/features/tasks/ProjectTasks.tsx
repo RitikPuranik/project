@@ -12,8 +12,8 @@ import { TaskForm } from "@/features/tasks/TaskForm";
 export default function ProjectTasks() {
   const { project } = useProject();
   const { user } = useAuth();
-  const editable = canEdit(user);
-  const manage = canManageTasks(project, user);
+  const editable = canEdit(user) && !project.isArchived;
+  const manage = canManageTasks(project, user) && !project.isArchived;
   const toast = useToast();
   const cols = sortedColumns(project);
   const { data: tasks, error, reload, setData } = useFetch(() => api.get<Task[]>(`/projects/${project._id}/tasks`).then((r) => r.data), [project._id]);
@@ -56,7 +56,7 @@ export default function ProjectTasks() {
 
   return (
     <>
-      {!editable && <ReadOnlyNote />}
+      {!editable && <ReadOnlyNote>{project.isArchived ? "This project is archived and read-only. Unarchive it to make changes." : undefined}</ReadOnlyNote>}
       <div className="mb-4 flex flex-wrap items-center gap-3">
         <Input type="search" aria-label="Search tasks" placeholder="Search tasks" value={q} onChange={(e) => setQ(e.target.value)} className="h-9 max-w-56" />
         <Select aria-label="Filter by status" value={status} onChange={(e) => setStatus(e.target.value)} className="h-9 w-auto min-w-36">
@@ -103,7 +103,7 @@ export default function ProjectTasks() {
                       <Link to={`/tasks/${t._id}`} className={cx("font-medium hover:text-accent-strong", isDone(t, project) && "text-muted line-through")}>{t.title}</Link>
                     </td>
                     <td className="px-3 py-2.5">
-                      {!canWorkOnTask(project, user, t) ? <span>{cols.find((c) => c.id === t.columnId)?.name}</span> : <Select aria-label={`Status for ${t.title}`} value={t.columnId} onChange={(e) => changeStatus(t, e.target.value)} className="h-8 w-auto min-w-32 text-[13px]">
+                      {!editable || !canWorkOnTask(project, user, t) ? <span>{cols.find((c) => c.id === t.columnId)?.name}</span> : <Select aria-label={`Status for ${t.title}`} value={t.columnId} onChange={(e) => changeStatus(t, e.target.value)} className="h-8 w-auto min-w-32 text-[13px]">
                         {cols.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                       </Select>}
                     </td>

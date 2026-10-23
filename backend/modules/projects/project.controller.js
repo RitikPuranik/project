@@ -3,6 +3,7 @@ import Project from "./project.model.js";
 import Task from "../tasks/task.model.js";
 import User from "../users/user.model.js";
 import { getProjectRole } from "./project.access.js";
+import { PROJECT_ROLES } from "../../shared/constants/roles.js";
 
 // Admin, or a project manager of *this* project (owner / assigned PM who also holds the
 // global Project Manager role). Same rule the task controller uses via req.projectRole.
@@ -15,7 +16,7 @@ const forbidden = (res, message) => res.status(403).json({ message });
 export const createProject = async (req, res) => {
   try {
     const { name, description, startDate, endDate, memberIds, managerId } = req.body;
-    if (!name) return res.status(400).json({ message: "Project name is required" });
+    if (!name || !String(name).trim()) return res.status(400).json({ message: "Project name is required" });
 
     // Optional: assign a Project Manager at creation time (admin workflow).
     let manager = null;
@@ -44,7 +45,7 @@ export const createProject = async (req, res) => {
     if (manager) members.unshift({ user: manager._id, role: "project_manager" });
 
     const project = await Project.create({
-      name,
+      name: String(name).trim(),
       description,
       owner: req.user._id,
       startDate,
@@ -67,6 +68,9 @@ export const getProjects = async (req, res) => {
     };
     // Admins can see everything
     const query = req.user.role === "admin" ? { isDeleted: false } : filter;
+    // Optional ?archived=true|false narrows to archived / active projects (default: both).
+    if (req.query.archived === "true") query.isArchived = true;
+    else if (req.query.archived === "false") query.isArchived = { $ne: true };
 
     const projects = await Project.find(query)
       .populate("owner", "name email avatar")
@@ -104,7 +108,18 @@ export const updateProject = async (req, res) => {
     }
 
     const { name, description, startDate, endDate, columns } = req.body;
-    if (name !== undefined) project.name = name;
+    if (name !== undefined && !String(name).trim()) {
+      return res.status(400).json({ message: "Project name can't be empty" });
+    }
+    for (const d of [startDate, endDate]) {
+      if (d && Number.isNaN(new Date(d).getTime())) return res.status(400).json({ message: "Invalid date" });
+    }
+    const nextStart = startDate !== undefined ? startDate : project.startDate;
+    const nextEnd = endDate !== undefined ? endDate : project.endDate;
+    if (nextStart && nextEnd && new Date(nextEnd) < new Date(nextStart)) {
+      return res.status(400).json({ message: "End date can't be before the start date" });
+    }
+    if (name !== undefined) project.name = String(name).trim();
     if (description !== undefined) project.description = description;
     if (startDate !== undefined) project.startDate = startDate;
     if (endDate !== undefined) project.endDate = endDate;
@@ -276,5 +291,66 @@ export const removeMember = async (req, res) => {
     res.json(project);
   } catch (err) {
     res.status(500).json({ message: "Failed to remove member", error: err.message });
+  }
+};
+
+// @route PUT /api/projects/:id/members/:userId/role   body: { role }
+// Change the project-level role of an existing member. Same rules as add/remove:
+//  - admin, or a manager of this project, may do it
+//  - granting or revoking "project_manager" is admin-only, and only for users who hold the
+//    global Project Manager role (project roles never exceed the global role)
+//  - the owner has no member entry, so the owner's role cannot be changed here
+export const updateMemberRole = async (req, res) => {
+  try {
+    const { role } = req.body;
+    const { userId } = req.params;
+    const project = await Project.findById(req.params.id);
+    if (!project || project.isDeleted) return res.status(404).json({ message: "Project not found" });
+
+    if (!canManageProject(req.user, project)) {
+      return forbidden(res, "Not authorized to manage members");
+    }
+    if (!PROJECT_ROLES.includes(role)) {
+      return res.status(400).json({ message: "Invalid project role" });
+    }
+    if (!mongoose.isValidObjectId(userId)) {
+      return res.status(400).json({ message: "A valid userId is required" });
+    }
+    if (project.owner.toString() === String(userId)) {
+      return res.status(400).json({ message: "The project owner's role can't be changed" });
+    }
+    const entry = project.members.find((m) => m.user.toString() === String(userId));
+    if (!entry) return res.status(404).json({ message: "Member not found in this project" });
+    if (entry.role === role) return res.json(project); // nothing to change
+
+    // Promoting to / demoting from project manager is an admin decision (mirrors add/remove).
+    if ((role === "project_manager" || entry.role === "project_manager") && req.user.role !== "admin") {
+      return forbidden(res, "Only an admin can assign or remove a project manager");
+    }
+
+    const targetUser = await User.findById(userId);
+    if (!targetUser) return res.status(404).json({ message: "User not found" });
+    if (role === "project_manager") {
+      if (targetUser.isActive === false) {
+        return res.status(400).json({ message: "Deactivated users can't be made project managers" });
+      }
+      if (!["admin", "project_manager"].includes(targetUser.role)) {
+        return res
+          .status(400)
+          .json({ message: "Only users with the Project Manager role can be made project managers" });
+      }
+    }
+
+    // Same rule as addMember: a global Viewer given a working role is promoted to Member.
+    if (targetUser.role === "viewer" && role === "member") {
+      targetUser.role = "member";
+      await targetUser.save();
+    }
+
+    entry.role = role;
+    await project.save();
+    res.json(project);
+  } catch (err) {
+    res.status(500).json({ message: "Failed to update member role", error: err.message });
   }
 };

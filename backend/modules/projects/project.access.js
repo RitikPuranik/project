@@ -53,7 +53,7 @@ const grant = (req, project) => {
 export const projectAccessParam = async (req, res, next, id) => {
   try {
     if (!mongoose.isValidObjectId(id)) return notFound(res, "Project");
-    const project = await Project.findOne({ _id: id, isDeleted: false }).select("owner members columns");
+    const project = await Project.findOne({ _id: id, isDeleted: false }).select("owner members columns isArchived");
     if (!project) return notFound(res, "Project");
     if (!grant(req, project)) return denied(res);
     next();
@@ -74,7 +74,7 @@ export const taskAccessParam = async (req, res, next, id) => {
       return notFound(res, "Task");
     }
     const project = await Project.findOne({ _id: task.project, isDeleted: false }).select(
-      "owner members columns"
+      "owner members columns isArchived"
     );
     if (!project) return notFound(res, "Task");
     if (!grant(req, project)) return denied(res);
@@ -90,6 +90,17 @@ export const taskAccessParam = async (req, res, next, id) => {
 export const requireProjectRole = (...allowed) => (req, res, next) => {
   if (!req.projectRole || !allowed.includes(req.projectRole)) {
     return res.status(403).json({ message: "Forbidden: insufficient permissions for this project" });
+  }
+  next();
+};
+
+// Archived projects are read-only: every write is refused with 409 until the project is
+// unarchived. Attach per route to writes (never to archive/unarchive, delete, or clone).
+export const blockArchivedWrites = (req, res, next) => {
+  if (req.project?.isArchived && !["GET", "HEAD", "OPTIONS"].includes(req.method)) {
+    return res
+      .status(409)
+      .json({ message: "This project is archived and read-only. Unarchive it to make changes.", code: "PROJECT_ARCHIVED" });
   }
   next();
 };

@@ -2,6 +2,7 @@ import express from "express";
 import { protect, authorize } from "../../shared/middleware/auth.js";
 import {
   listUsers,
+  getUser,
   createUser,
   updateUser,
   updateUserRole,
@@ -15,6 +16,7 @@ router.use(protect);
 
 router.get("/", listUsers); // scoped by the caller's role
 router.post("/", authorize("admin"), createUser);
+router.get("/:id", authorize("admin"), getUser);
 router.put("/:id", authorize("admin"), updateUser);
 router.put("/:id/role", authorize("admin"), updateUserRole);
 router.put("/:id/deactivate", authorize("admin"), deactivateUser);

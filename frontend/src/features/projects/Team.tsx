@@ -3,11 +3,13 @@ import api from "@/shared/lib/api";
 import { useAuth } from "@/features/auth/auth";
 import { errorMessage } from "@/shared/lib/format";
 import { useProject } from "@/features/projects/projectContext";
-import type { Person } from "@/shared/lib/types";
-import { Avatar, Button, Input, RoleBadge, Select, useToast } from "@/shared/components/ui";
+import type { Member, Person } from "@/shared/lib/types";
+import { Avatar, Button, Input, ReadOnlyNote, RoleBadge, Select, useToast } from "@/shared/components/ui";
 
 export default function Team() {
-  const { project, reload, canManage } = useProject();
+  const { project, reload, canManage: canManageRaw } = useProject();
+  const archived = project.isArchived;
+  const canManage = canManageRaw && !archived; // archived projects are read-only
   const toast = useToast();
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
@@ -55,8 +57,19 @@ export default function Team() {
     }
   }
 
+  async function changeRole(u: Person, next: Member["role"]) {
+    try {
+      await api.put(`/projects/${project._id}/members/${u._id}/role`, { role: next });
+      toast(`${u.name} is now ${next === "project_manager" ? "a project manager" : `a ${next}`}`);
+      reload();
+    } catch (err) {
+      toast(errorMessage(err), "error");
+    }
+  }
+
   return (
     <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
+      {archived && <div className="lg:col-span-2"><ReadOnlyNote>This project is archived. Unarchive it to change the team.</ReadOnlyNote></div>}
       <section aria-labelledby="members-h" className="rounded-2xl border border-line bg-surface">
         <h2 id="members-h" className="border-b border-line px-5 py-4 text-lg font-semibold">
           Members <span className="text-sm font-normal text-muted">{project.members.length + 1}</span>
@@ -77,7 +90,15 @@ export default function Team() {
                 <p className="truncate text-sm font-medium">{m.user.name}</p>
                 <p className="truncate text-xs text-muted">{m.user.email}</p>
               </div>
-              <RoleBadge role={m.role} />
+              {canManage && (isAdmin || m.role !== "project_manager") ? (
+                <Select aria-label={`Project role for ${m.user.name}`} value={m.role} onChange={(e) => changeRole(m.user, e.target.value as Member["role"])}>
+                  <option value="member">Member</option>
+                  <option value="viewer">Viewer (read-only)</option>
+                  {isAdmin && <option value="project_manager">Project manager</option>}
+                </Select>
+              ) : (
+                <RoleBadge role={m.role} />
+              )}
               {canManage && (isAdmin || m.role !== "project_manager") && <Button size="sm" variant="ghost" onClick={() => remove(m.user)}>Remove</Button>}
             </li>
           ))}
@@ -110,7 +131,7 @@ export default function Team() {
           </ul>
         </section>
       ) : (
-        <p className="h-fit rounded-2xl bg-wash px-5 py-4 text-sm text-muted">Only the project owner, project managers and admins can change the team.</p>
+        <p className="h-fit rounded-2xl bg-wash px-5 py-4 text-sm text-muted">{archived ? "The team can't be changed while the project is archived." : "Only the project owner, project managers and admins can change the team."}</p>
       )}
     </div>
   );

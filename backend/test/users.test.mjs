@@ -139,3 +139,23 @@ test("admins can't deactivate themselves or remove the last active admin", async
   assert.equal((await call(admin, "PUT", `/users/${admin2._id}/role`, { role: "member" })).status, 200, "inactive admin can be demoted");
   assert.equal((await call(admin2, "GET", "/users")).status, 403, "deactivated admin is locked out");
 });
+
+test("admin can view a single user; others can't; bad ids 404", async () => {
+  const r = await call(admin, "GET", `/users/${target._id}`);
+  assert.equal(r.status, 200);
+  assert.equal(r.body.id, String(target._id));
+  assert.equal(r.body.password, undefined);
+  assert.equal((await call(member, "GET", `/users/${target._id}`)).status, 403);
+  assert.equal((await call(null, "GET", `/users/${target._id}`)).status, 401);
+  assert.equal((await call(admin, "GET", "/users/not-an-id")).status, 404);
+  assert.equal((await call(admin, "GET", "/users/000000000000000000000000")).status, 404);
+});
+
+test("login matches email case-insensitively", async () => {
+  member.matchPassword = async () => true;
+  const login = await fetch(`${base}/auth/login`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: ` ${member.email.toUpperCase()} `, password: "secret123" }),
+  });
+  assert.equal(login.status, 200);
+});

@@ -12,8 +12,8 @@ import { TaskForm } from "@/features/tasks/TaskForm";
 export default function Board() {
   const { project } = useProject();
   const { user } = useAuth();
-  const editable = canEdit(user);
-  const manage = canManageTasks(project, user);
+  const editable = canEdit(user) && !project.isArchived;
+  const manage = canManageTasks(project, user) && !project.isArchived;
   const toast = useToast();
   const cols = sortedColumns(project);
   const { data: tasks, error, reload, setData } = useFetch(() => api.get<Task[]>(`/projects/${project._id}/tasks`).then((r) => r.data), [project._id]);
@@ -71,7 +71,7 @@ export default function Board() {
 
   return (
     <>
-      {!editable && <ReadOnlyNote />}
+      {!editable && <ReadOnlyNote>{project.isArchived ? "This project is archived and read-only. Unarchive it to make changes." : undefined}</ReadOnlyNote>}
       <div className="mb-5 rounded-2xl border border-line bg-surface p-4">
         <StageBar columns={project.columns} tasks={tasks} height={12} legend />
       </div>
@@ -140,7 +140,7 @@ export default function Board() {
                         task={t}
                         done={isDone(t, project)}
                         dragging={dragId === t._id}
-                        readOnly={!canWorkOnTask(project, user, t)}
+                        readOnly={!editable || !canWorkOnTask(project, user, t)}
                         onDragStart={(e) => { setDragId(t._id); e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", t._id); }}
                         onDragEnd={() => { setDragId(null); setOverCol(null); }}
                       />

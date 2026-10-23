@@ -66,7 +66,7 @@ export default function ProjectLayout() {
           <AvatarStack people={projectPeople(project)} />
           {canManage && (
             <>
-              <Button size="sm" onClick={() => setEditing(true)}>Edit</Button>
+              {!project.isArchived && <Button size="sm" onClick={() => setEditing(true)}>Edit</Button>}
               <Button size="sm" onClick={() => run(() => api.put(`/projects/${project._id}/archive`), project.isArchived ? "Project restored" : "Project archived")}>
                 {project.isArchived ? "Unarchive" : "Archive"}
               </Button>
