@@ -5,9 +5,9 @@ import { CONFLICT_TOAST, PRIORITIES, canEdit, canManageTasks, canWorkOnTask, con
 import { useProject } from "@/features/projects/projectContext";
 import type { Priority, Task } from "@/shared/lib/types";
 import { useFetch } from "@/shared/lib/useFetch";
-import { Button, ErrorNote, Input, PageLoader, ReadOnlyNote, Select, StageBar, StageDot, useToast } from "@/shared/components/ui";
-import { TaskCard } from "@/features/tasks/TaskCard";
+import { Button, ConfirmModal, ErrorNote, Input, PageLoader, ReadOnlyNote, Select, StageBar, StageDot, useToast } from "@/shared/components/ui";
 import { TaskForm } from "@/features/tasks/TaskForm";
+import { TaskCard } from "@/features/tasks/TaskCard";
 
 export default function Board() {
   const { project } = useProject();
@@ -22,7 +22,8 @@ export default function Board() {
   const [dragId, setDragId] = useState<string | null>(null);
   const [overCol, setOverCol] = useState<string | null>(null);
   const [creatingIn, setCreatingIn] = useState<string | null>(null);
-  const [quick, setQuick] = useState<{ col: string; title: string } | null>(null);
+  const [overTrash, setOverTrash] = useState(false);
+  const [toDelete, setToDelete] = useState<Task | null>(null);
 
   if (error && !tasks) return <ErrorNote message={error} onRetry={reload} />;
   if (!tasks) return <PageLoader label="Loading board" />;
@@ -57,18 +58,6 @@ export default function Board() {
     }
   }
 
-  async function quickAdd(e: React.FormEvent) {
-    e.preventDefault();
-    if (!quick?.title.trim()) return;
-    try {
-      await api.post(`/projects/${project._id}/tasks`, { title: quick.title.trim(), columnId: quick.col });
-      setQuick(null);
-      reload();
-    } catch (err) {
-      toast(errorMessage(err), "error");
-    }
-  }
-
   return (
     <>
       {!editable && <ReadOnlyNote>{project.isArchived ? "This project is archived and read-only. Unarchive it to make changes." : undefined}</ReadOnlyNote>}
@@ -86,7 +75,28 @@ export default function Board() {
           {PRIORITIES.map((p) => <option key={p} value={p}>{p}</option>)}
         </Select>
         {(assignee || priority) && <Button size="sm" variant="ghost" onClick={() => { setAssignee(""); setPriority(""); }}>Clear filters</Button>}
-        {manage && <Button variant="primary" size="sm" className="ml-auto" onClick={() => setCreatingIn(cols[0]?.id ?? "")}>New task</Button>}
+        {manage && (
+          <div
+            role="button"
+            tabIndex={0}
+            aria-label="Delete zone: drag a task here to delete it"
+            onDragOver={(e) => { if (dragId) { e.preventDefault(); setOverTrash(true); } }}
+            onDragLeave={() => setOverTrash(false)}
+            onDrop={(e) => {
+              e.preventDefault();
+              setOverTrash(false);
+              const t = tasks.find((x) => x._id === dragId);
+              setDragId(null);
+              if (t) setToDelete(t);
+            }}
+            className={`ml-auto flex h-9 items-center gap-2 rounded-xl border-2 border-dashed px-4 text-sm font-medium transition-colors ${
+              overTrash ? "border-danger bg-danger-wash text-danger" : dragId ? "border-danger text-danger" : "border-line text-muted"
+            }`}
+          >
+            <svg viewBox="0 0 20 20" className="size-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M4 6h12M8 6V4h4v2M6 6l1 10h6l1-10" /></svg>
+            {overTrash ? "Release to delete" : "Drag here to delete"}
+          </div>
+        )}
       </div>
 
       <div className="-mx-4 overflow-x-auto px-4 pb-4 sm:-mx-8 sm:px-8">
@@ -114,16 +124,11 @@ export default function Board() {
                     {c.name}
                     <span className="text-sm font-normal text-muted">{total}</span>
                   </h2>
-                  {manage && <button type="button" aria-label={`Add task to ${c.name}`} onClick={() => setQuick({ col: c.id, title: "" })} className="grid size-7 place-items-center rounded-lg text-muted hover:bg-surface hover:text-ink">
+                  {manage && <button type="button" aria-label={`Add task to ${c.name}`} onClick={() => setCreatingIn(c.id)} className="grid size-7 place-items-center rounded-lg text-muted hover:bg-surface hover:text-ink">
                     <svg viewBox="0 0 20 20" className="size-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M10 4v12M4 10h12" /></svg>
                   </button>}
                 </header>
                 <div className="flex flex-1 flex-col gap-2">
-                  {quick?.col === c.id && (
-                    <form onSubmit={quickAdd} className="rounded-xl border border-accent bg-surface p-2">
-                      <Input autoFocus aria-label="Task title" placeholder="Task title, then Enter" value={quick.title} onChange={(e) => setQuick({ col: c.id, title: e.target.value })} onKeyDown={(e) => e.key === "Escape" && setQuick(null)} />
-                    </form>
-                  )}
                   {list.map((t) => (
                     <div
                       key={t._id}
@@ -146,7 +151,7 @@ export default function Board() {
                       />
                     </div>
                   ))}
-                  {list.length === 0 && !quick && (
+                  {list.length === 0 && (
                     <p className="px-2 py-6 text-center text-sm text-faint">{total ? "No tasks match the filters" : manage ? "Drop tasks here" : "No tasks"}</p>
                   )}
                 </div>
@@ -166,6 +171,30 @@ export default function Board() {
           onSaved={() => { setCreatingIn(null); toast("Task created"); reload(); }}
         />
       )}
+      <ConfirmModal
+        open={!!toDelete}
+        title="Delete this task?"
+        body={`"${toDelete?.title ?? ""}" will be removed from the board and task list.`}
+        confirmLabel="Delete task"
+        onClose={() => setToDelete(null)}
+        onConfirm={async () => {
+          const t = toDelete;
+          setToDelete(null);
+          if (!t) return;
+          try {
+            await api.delete(`/projects/${project._id}/tasks/${t._id}`, { params: { version: t.version } });
+            setData((list) => (list ?? []).filter((x) => x._id !== t._id));
+            toast("Task deleted");
+          } catch (err) {
+            if (conflictFrom(err)) {
+              toast(CONFLICT_TOAST, "error");
+              reload();
+            } else {
+              toast(errorMessage(err), "error");
+            }
+          }
+        }}
+      />
     </>
   );
 }

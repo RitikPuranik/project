@@ -10,6 +10,7 @@ interface AuthContextValue {
   user: Person | null;
   status: Status;
   login: (email: string, password: string, remember: boolean) => Promise<void>;
+  completeOAuth: (accessToken: string, refreshToken: string) => Promise<void>;
   register: (name: string, email: string, password: string, role?: string) => Promise<void>;
   logout: () => Promise<void>;
 }
@@ -103,6 +104,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [persist]
   );
 
+  // Finishes a redirect-based sign-in (Google): store the tokens, then load the profile.
+  const completeOAuth = useCallback(
+    async (accessToken: string, refreshToken: string) => {
+      clearTokens();
+      localStorage.setItem("accessToken", accessToken);
+      localStorage.setItem("refreshToken", refreshToken);
+      try {
+        const { data } = await api.get<{ user: RawUser }>("/auth/me");
+        persist({ user: data.user, accessToken, refreshToken }, true);
+      } catch (err) {
+        clearTokens();
+        throw err;
+      }
+    },
+    [persist]
+  );
+
   const register = useCallback(
     async (name: string, email: string, password: string, role?: string) => {
       const { data } = await api.post("/auth/register", { name, email, password, role });
@@ -125,8 +143,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [navigate]);
 
   const value = useMemo(
-    () => ({ user, status, login, register, logout }),
-    [user, status, login, register, logout]
+    () => ({ user, status, login, completeOAuth, register, logout }),
+    [user, status, login, completeOAuth, register, logout]
   );
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

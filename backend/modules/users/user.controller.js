@@ -1,6 +1,8 @@
 import mongoose from "mongoose";
 import User from "./user.model.js";
 import Project from "../projects/project.model.js";
+import { sendEmailQuietly } from "../../shared/email/emailjs.js";
+import { welcomeEmail, passwordChangedEmail } from "../../shared/email/templates.js";
 
 const ROLES = ["admin", "project_manager", "member", "viewer"];
 const escapeRegex = (str) => String(str).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -87,7 +89,15 @@ export const listUsers = async (req, res) => {
       filter._id = { $in: allowedIds };
     }
     // Deactivated accounts only show up for admins (who can reactivate them).
-    if (currentUserRole !== "admin" || req.query.includeInactive === "false") {
+    // Admin filters: ?status=active|inactive (default: both) and ?role=<role>.
+    const { status, role } = req.query;
+    if (role !== undefined && role !== "") {
+      if (!ROLES.includes(role)) return res.status(400).json({ message: "Invalid role filter" });
+      filter.role = role;
+    }
+    if (currentUserRole === "admin" && status === "inactive") {
+      filter.isActive = false;
+    } else if (currentUserRole !== "admin" || status === "active" || req.query.includeInactive === "false") {
       filter.isActive = { $ne: false };
     }
 
@@ -133,6 +143,7 @@ export const createUser = async (req, res) => {
     if (existing) return res.status(400).json({ message: "An account with this email already exists" });
 
     const user = await User.create({ name: name.trim(), email: email.trim(), password, role });
+    sendEmailQuietly({ to: user.email, ...welcomeEmail({ name: user.name, addedByAdmin: true }) });
     res.status(201).json(user.toSafeObject());
   } catch (err) {
     res.status(500).json({ message: "Failed to create user", error: err.message });
@@ -146,6 +157,7 @@ export const updateUser = async (req, res) => {
     if (!user) return res.status(404).json({ message: "User not found" });
 
     const { name, email, role, password } = req.body;
+    let passwordChanged = false;
 
     if (name !== undefined) {
       if (!String(name).trim()) return res.status(400).json({ message: "Name can't be empty" });
@@ -176,9 +188,11 @@ export const updateUser = async (req, res) => {
       }
       user.password = password;
       user.refreshToken = null; // force re-login everywhere after an admin password reset
+      passwordChanged = true;
     }
 
     await user.save();
+    if (passwordChanged) sendEmailQuietly({ to: user.email, ...passwordChangedEmail({ name: user.name }) });
     res.json(user.toSafeObject());
   } catch (err) {
     res.status(500).json({ message: "Failed to update user", error: err.message });

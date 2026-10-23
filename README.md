@@ -23,6 +23,35 @@ A modern, responsive full-stack project and task management system built with Ex
 
 ---
 
+## ✉️ Email (EmailJS)
+
+All emails (OTP codes, forgot password, welcome, password-changed, verification) are sent from the **backend** through one EmailJS template.
+
+**EmailJS template fields** (Email Templates → your template):
+
+| Field | Value |
+|---|---|
+| Subject | `{{subject}}` |
+| To Email | `{{to_email}}` |
+| From Name | `{{from_name}}` |
+| Content (HTML) | `{{{html_body}}}` |
+
+**Backend `.env`:** `EMAILJS_SERVICE_ID`, `EMAILJS_TEMPLATE_ID`, `EMAILJS_PUBLIC_KEY`, `EMAILJS_PRIVATE_KEY` (EmailJS → Account → API keys), optional `EMAIL_FROM_NAME`.
+In EmailJS → Account → Security, enable **Allow EmailJS API for non-browser applications**, otherwise server calls are rejected.
+Without these variables, dev mode just prints the email (including OTP) to the backend console; production refuses to start the reset flow.
+
+| Endpoint | What it does |
+|---|---|
+| `POST /api/auth/forgot-password` `{email}` | Emails a 6-digit code (same response whether or not the account exists; 60 s resend cooldown) |
+| `POST /api/auth/verify-reset-otp` `{email, otp}` | Checks the code (10 min expiry, single use, locks after 5 wrong tries) and returns a 10-minute `resetToken` |
+| `POST /api/auth/reset-password` `{resetToken, newPassword}` | Sets the password, signs out all sessions, sends a "password changed" notice; the token stops working once used |
+| `POST /api/auth/send-verification` / `verify-email` `{otp}` | Signed-in email-verification OTP (sets `isVerified`; not enforced at login) |
+
+Welcome emails go out on registration, first Google sign-in and admin-created accounts; admin password resets send the "password changed" notice. New email types: add a builder in `shared/email/templates.js` and call `sendEmail()` / `sendEmailQuietly()`.
+Frontend: **Forgot password?** link on the sign-in page → `/forgot-password` (three steps: email → verify code → new password).
+
+---
+
 ## 🚀 Architecture & Tech Stack
 
 ```
@@ -31,6 +60,9 @@ project/
 │   ├── server.js                  # Boot only: env, database connection, listen
 │   ├── app.js                     # createApp(): middleware + module routes (reused by tests)
 │   ├── config/                    # Database connection
+│   ├── migrations/                # Versioned DB migrations + runner.js
+│   ├── scripts/                   # migrate.js, seed.js (CLI entry points)
+│   ├── seed/                      # demoData.js (demo users, projects, tasks)
 │   ├── modules/                   # One folder per feature, each with its own model/controller/routes
 │   │   ├── index.js               # registerRoutes(): mounts every module under /api
 │   │   ├── auth/                  # auth.controller.js, auth.routes.js
@@ -101,9 +133,19 @@ project/
    JWT_REFRESH_SECRET=your_jwt_refresh_secret_key_here_min_32_chars
    JWT_REFRESH_EXPIRES_IN=7d
    CLIENT_URL=http://localhost:5173
+   # Optional - Google sign-in (see "Google sign-in setup")
+   GOOGLE_CLIENT_ID=
+   GOOGLE_CLIENT_SECRET=
+   GOOGLE_CALLBACK_URL=http://localhost:5000/api/auth/google/callback
    ```
 
-5. Start the backend server:
+5. Apply the database migrations and (optionally) load demo data — see [Database migrations & seed data](#-database-migrations--seed-data):
+   ```bash
+   npm run migrate
+   npm run seed
+   ```
+
+6. Start the backend server:
    ```bash
    # Development mode with nodemon
    npm run dev
@@ -147,11 +189,81 @@ project/
 
 ---
 
+## ⚙️ Environment variables
+
+**Backend (`backend/.env`)**
+
+| Variable | Required | Description |
+|---|:---:|---|
+| `MONGO_URI` | ✅ | MongoDB connection string, e.g. `mongodb://localhost:27017/orbin` or an Atlas URI |
+| `JWT_SECRET` | ✅ | Secret for access tokens (32+ characters) |
+| `JWT_REFRESH_SECRET` | ✅ | Secret for refresh tokens (32+ characters, different from the above) |
+| `JWT_EXPIRES_IN` | | Access-token lifetime (default `1d`) |
+| `JWT_REFRESH_EXPIRES_IN` | | Refresh-token lifetime (default `7d`) |
+| `PORT` | | API port (default `5000`) |
+| `CLIENT_URL` | | Allowed CORS origin, e.g. `http://localhost:5173` |
+| `GOOGLE_CLIENT_ID` | | Google OAuth "Web application" client ID |
+| `GOOGLE_CLIENT_SECRET` | | The client's secret (backend only, never exposed to the browser) |
+| `GOOGLE_CALLBACK_URL` | | Redirect URI Google returns to. Default `http://localhost:5000/api/auth/google/callback`; must match the Google client exactly |
+
+**Frontend (`frontend/.env`)**
+
+| Variable | Required | Description |
+|---|:---:|---|
+| `VITE_API_URL` | | API base URL. Leave unset in dev (Vite proxies `/api` to `localhost:5000`) |
+
+**Google sign-in setup:**
+1. In [Google Cloud Console](https://console.cloud.google.com/apis/credentials) → *Credentials* → *Create credentials* → *OAuth client ID* → type **Web application** (configure the consent screen first if asked; add yourself as a test user while it's in "Testing").
+2. Under **Authorized redirect URIs** add `http://localhost:5000/api/auth/google/callback` (your `GOOGLE_CALLBACK_URL`; use your API's public URL in production).
+3. Copy the **Client ID** and **Client secret** into `backend/.env` as `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`, and restart the backend. Nothing is needed in the frontend `.env`.
+4. Click **Continue with Google** on `/login` or `/register`. Flow: browser → `GET /api/auth/google` → Google → `GET /api/auth/google/callback` → back to `CLIENT_URL/auth/google/callback`, signed in.
+
+New Google users start as **Viewer**; an existing account with the same verified email is linked and keeps its role. Deactivated accounts can't sign in. If the variables are missing, the login page shows which ones to set.
+
+---
+
+## 🗄 Database migrations & seed data
+
+MongoDB is schemaless, so migrations are small versioned scripts in `backend/migrations/` (`NNNN_description.js`, each exporting `up(db)` and `down(db)`). Applied migrations are recorded in the `schema_migrations` collection and run in filename order, once.
+
+Run these from `backend/` (they read `MONGO_URI` from `.env`):
+
+| Command | What it does |
+|---|---|
+| `npm run migrate` | Apply all pending migrations (creates indexes, backfills defaults) |
+| `npm run migrate:status` | List which migrations are applied / pending |
+| `npm run migrate:down` | Roll back the most recent migration (`npm run migrate:down -- 2` for the last two) |
+| `npm run seed` | Apply pending migrations, then create the demo users, projects and tasks. Safe to re-run: existing demo users/projects are kept |
+| `npm run seed:reset` | Delete the demo data, then re-create it from scratch (resets demo passwords) |
+| `npm run seed:bulk` | Everything `seed` does, **plus a large generated dataset**: 40 users, 20 projects and ~1,500 tasks (with subtasks, comments, labels, due dates, a few archived projects, deactivated users and soft-deleted tasks). Skipped if bulk data already exists |
+| `npm run seed:bulk -- --scale=5` | Same, 5× larger (200 users, 100 projects, ~7,500 tasks). `--scale` takes any whole number |
+| `npm run seed:bulk:reset` | Remove all demo and bulk data and regenerate it |
+
+To add a migration, create `backend/migrations/0003_your_change.js` exporting `up` and `down`. Seed content lives in `backend/seed/demoData.js` (hand-written demo) and `backend/seed/bulkData.js` (generator; the same scale always produces the same data). Bulk accounts are `user0001@bulk.orbin.test` … with the same demo password; the first two are admins, and bulk projects are named `[Bulk] …`.
+
+Seeded data: five users (one per role plus a second member), an active **Orbin Demo Project** with tasks in every column, subtasks and a comment, and an archived **Legacy Website (Archived)** project.
+
+### Demo credentials
+
+All demo accounts use the password **`Password@123`**.
+
+| Role | Email |
+|---|---|
+| Admin | `admin@orbin.test` |
+| Project Manager | `pm@orbin.test` |
+| Team Member | `member@orbin.test` |
+| Team Member | `member2@orbin.test` |
+| Viewer | `viewer@orbin.test` |
+
+> Demo accounts are for local development only. Don't run `npm run seed` against a production database.
+
+---
+
 ## 🔑 First Run & Authentication
 
 1. Open your browser and navigate to `http://localhost:5173/register`.
 2. **Default Role**: All newly registered users default to **`viewer`**.
-3. **Admin Bootstrap**: The first administrator is designated directly in MongoDB (e.g. `db.users.updateOne({ email: "admin@example.com" }, { $set: { role: "admin" } })`).
+3. **Admin Bootstrap**: Run `npm run seed` for a ready-made admin (`admin@orbin.test`), or designate one directly in MongoDB (e.g. `db.users.updateOne({ email: "admin@example.com" }, { $set: { role: "admin" } })`).
 4. **Role Promotions**:
    - **Admin** can promote any user to **Project Manager** (or any other role) from `/users`.
    - **Project Managers** can select **Viewers** and add them to projects as **Members**.
@@ -195,7 +307,7 @@ project/
 - `/register` — Account registration (new accounts start as Viewer; an admin grants higher roles)
 - `/dashboard` — Overview of active projects, assigned tasks, and quick actions
 - `/projects` — Project listing, creation, cloning, and archiving
-- `/projects/:id` — Interactive Kanban board with drag-and-drop column workflow
+- `/projects/:id` — Interactive Kanban board with drag-and-drop; the **+** on a column opens the full task form (title, assignees, priority, etc.); drag a card onto the **Drag here to delete** zone to delete it (with confirmation)
 - `/projects/:id/tasks` — Tabular task list with status, priority, and assignee filters
 - `/projects/:id/team` — Member roster and invitation management
 - `/tasks/:id` — Detailed task modal with subtasks, comments, priority, and metadata
@@ -209,19 +321,22 @@ project/
 ### Auth (`/api/auth`)
 - `POST /api/auth/register` — Register a new account
 - `POST /api/auth/login` — Sign in and receive access/refresh tokens
+- `GET /api/auth/google` — Start Google sign-in (redirects to Google)
+- `GET /api/auth/google/callback` — Google redirect target; creates/links the account and returns to the app signed in
 - `POST /api/auth/refresh` — Refresh expired JWT access token
 - `POST /api/auth/logout` — Invalidate refresh token
 - `GET /api/auth/me` — Retrieve authenticated user profile
 
 ### Projects (`/api/projects`)
-- `GET /api/projects` — List all accessible projects
+- `GET /api/projects` — List all accessible projects (optional `?archived=true|false`)
 - `POST /api/projects` — Create a project (Admin only; optional `managerId`)
 - `GET /api/projects/:id` — Get project details and columns
 - `PUT /api/projects/:id` — Update project information
-- `PUT /api/projects/:id/archive` — Toggle project archive state
+- `PUT /api/projects/:id/archive` — Toggle project archive state. Archived projects are read-only (writes return `409 PROJECT_ARCHIVED`)
 - `POST /api/projects/:id/clone` — Duplicate project structure (Admin & PM)
 - `DELETE /api/projects/:id` — Delete project (Admin only)
 - `POST /api/projects/:id/members` — Add member (`role`: `member`, `viewer`, or `project_manager` — admin only)
+- `PUT /api/projects/:id/members/:userId/role` — Change a member's project role (`member`, `viewer`, or `project_manager` — admin only)
 - `DELETE /api/projects/:id/members/:userId` — Remove member from project
 
 ### Tasks (`/api/projects/:projectId/tasks`)
@@ -236,7 +351,8 @@ project/
 - `DELETE /api/projects/:projectId/tasks/:id` — Delete task
 
 ### Users (`/api/users`)
-- `GET /api/users?search=` — Search users by name or email
+- `GET /api/users?search=&role=&status=` — Search users by name or email; admins can also filter by `role` and `status` (`active` / `inactive`)
+- `GET /api/users/:id` — View one user (Admin only)
 - `POST /api/users` — Create a user with a role (Admin only)
 - `PUT /api/users/:id` — Update name, email, role, password (Admin only)
 - `PUT /api/users/:id/role` — Update user role (Admin only)
@@ -262,4 +378,4 @@ Every task has a `version` number (starts at `0`, +1 on each successful change).
 - Comments and *adding* a subtask are append-only atomic `$push` operations: they never conflict with edits and don't change the version.
 - The edit form sends only the fields you changed. On a 409 it shows what the other person changed and lets you **load the latest version** or **keep your edits** (merged onto the latest) before saving again.
 
-Tests: `cd backend && npm test` (roles + concurrency, no MongoDB needed). Browser test of the conflict UI: `frontend/e2e/conflict.e2e.mjs`.
+Tests: `cd backend && npm test` (roles, concurrency, users, project members, archiving, Google sign-in, migrations; no MongoDB needed). Browser test of the conflict UI: `frontend/e2e/conflict.e2e.mjs`.

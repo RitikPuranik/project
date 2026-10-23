@@ -2,7 +2,9 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import { AppShell } from "@/shared/components/AppShell";
 import AuthLayout from "@/features/auth/AuthLayout";
 import Login from "@/features/auth/Login";
+import GoogleCallback from "@/features/auth/GoogleCallback";
 import Register from "@/features/auth/Register";
+import ForgotPassword from "@/features/auth/ForgotPassword";
 import Dashboard from "@/features/dashboard/Dashboard";
 import Projects from "@/features/projects/Projects";
 import ProjectLayout from "@/features/projects/ProjectLayout";
@@ -19,7 +21,9 @@ export default function App() {
       <Route element={<AuthLayout />}>
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
+        <Route path="/forgot-password" element={<ForgotPassword />} />
       </Route>
+      <Route path="/auth/google/callback" element={<GoogleCallback />} />
       <Route element={<AppShell />}>
         <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/projects" element={<Projects />} />

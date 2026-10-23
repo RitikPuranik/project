@@ -2,6 +2,7 @@
 import { Link, useNavigate } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { Button, ErrorNote, Field, Input, Select } from "@/shared/components/ui";
+import { GoogleButton } from "@/features/auth/GoogleButton";
 import { useAuth } from "@/features/auth/auth";
 import { errorMessage } from "@/shared/lib/format";
 
@@ -55,6 +56,7 @@ export default function Register() {
       <Button type="submit" variant="primary" loading={busy} disabled={!name || !email || !password}>
         Create account
       </Button>
+      <GoogleButton />
       <p className="text-center text-sm text-muted">
         Already have an account?{" "}
         <Link to="/login" className="font-medium text-accent-strong underline underline-offset-2">

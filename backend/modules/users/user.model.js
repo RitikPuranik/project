@@ -12,9 +12,18 @@ const userSchema = new mongoose.Schema(
       default: "viewer",
     },
     avatar: { type: String, default: "" },
+    googleId: { type: String, unique: true, sparse: true }, // set once an account is linked to Google
     isActive: { type: Boolean, default: true }, // false = deactivated: cannot log in or use any token
     isVerified: { type: Boolean, default: true }, // simplified: no email verification flow wired up yet
     refreshToken: { type: String, default: null },
+    // Pending one-time code (hashed) for password reset / email verification
+    otp: {
+      hash: String,
+      purpose: String,
+      expiresAt: Date,
+      attempts: { type: Number, default: 0 },
+      sentAt: Date,
+    },
   },
   { timestamps: true }
 );

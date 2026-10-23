@@ -159,3 +159,28 @@ test("login matches email case-insensitively", async () => {
   });
   assert.equal(login.status, 200);
 });
+
+test("admin can filter the user list by role and status; non-admins never see deactivated users", async () => {
+  User.find = (f) => {
+    const rows = all.filter((u) =>
+      (!f.role || u.role === f.role) &&
+      (f.isActive === undefined || (f.isActive === false ? u.isActive === false : u.isActive !== false)) &&
+      (!f._id || f._id.$in.map(String).includes(String(u._id)))
+    );
+    const c = { select: () => c, sort: () => c, limit: () => rows, then: (res) => Promise.resolve(rows).then(res) };
+    return c;
+  };
+  await call(admin, "PUT", `/users/${target._id}/deactivate`);
+  const ids = async (u, qs) => (await call(u, "GET", `/users${qs}`)).body.map((x) => String(x._id ?? x.id));
+  assert.ok((await ids(admin, "")).includes(String(target._id)), "default shows everyone");
+  assert.ok((await ids(admin, "?status=inactive")).includes(String(target._id)), "inactive filter lists deactivated users");
+  assert.ok((await ids(admin, "?status=inactive")).every((i) => all.find((u) => String(u._id) === i).isActive === false));
+  assert.ok(!(await ids(admin, "?status=active")).includes(String(target._id)));
+  const admins = await ids(admin, "?role=admin");
+  assert.ok(admins.length >= 1 && admins.every((i) => all.find((u) => String(u._id) === i).role === "admin"));
+  assert.equal((await call(admin, "GET", "/users?role=root")).status, 400);
+  const both = await ids(admin, "?role=member&status=inactive");
+  assert.ok(both.every((i) => { const u = all.find((x) => String(x._id) === i); return u.role === "member" && u.isActive === false; }), "filters combine");
+  assert.ok(both.includes(String(target._id)), "deactivated target (now a member) matches both filters");
+  assert.ok(!(await ids(admin, "?role=viewer&status=inactive")).includes(String(target._id)), "role filter excludes other roles");
+});
