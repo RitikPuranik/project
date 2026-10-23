@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import api from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { CONFLICT_TOAST, PRIORITIES, TYPES, canComment, canEdit, canManageTasks, canWorkOnTask, conflictFrom, dueLabel, errorMessage, formatDate, formatDateTime, isDone, isTaskGone, sortedColumns } from "@/lib/format";
+import { CONFLICT_TOAST, PRIORITIES, TYPES, canComment, canDeleteComment, canEdit, canManageTasks, canWorkOnTask, conflictFrom, dueLabel, errorMessage, formatDate, formatDateTime, isDone, isTaskGone, sortedColumns } from "@/lib/format";
 import type { Priority, Project, Task, TaskType } from "@/lib/types";
 import { useFetch } from "@/lib/useFetch";
 import { Avatar, Button, ConfirmModal, ErrorNote, Input, PageLoader, ReadOnlyNote, Select, Textarea, cx, useToast } from "@/components/ui";
@@ -22,6 +22,7 @@ export default function TaskDetail() {
   const [deleting, setDeleting] = useState(false);
   const [subtask, setSubtask] = useState("");
   const [comment, setComment] = useState("");
+  const [deletingComment, setDeletingComment] = useState<string | null>(null);
   const [posting, setPosting] = useState(false);
   const [stale, setStale] = useState(false);
   const editable = canEdit(user);
@@ -130,10 +131,15 @@ export default function TaskDetail() {
               {task.comments.map((c) => (
                 <li key={c._id} className="flex gap-3">
                   <Avatar person={c.author} size={32} />
-                  <div className="min-w-0">
+                  <div className="min-w-0 flex-1">
                     <p className="text-sm"><span className="font-medium">{c.author.name}</span> <span className="text-xs text-muted">{formatDateTime(c.createdAt)}</span></p>
                     <p className="mt-0.5 text-sm leading-relaxed whitespace-pre-wrap">{c.text}</p>
                   </div>
+                  {canDeleteComment(project, user, c.author._id) && (
+                    <Button size="sm" variant="ghost" className="h-fit text-danger hover:text-danger" aria-label={`Delete comment by ${c.author.name}`} onClick={() => setDeletingComment(c._id)}>
+                      Delete
+                    </Button>
+                  )}
                 </li>
               ))}
               {task.comments.length === 0 && <li className="text-sm text-muted">{commenting ? "No comments yet. Start the conversation." : "No comments yet."}</li>}
@@ -233,6 +239,18 @@ export default function TaskDetail() {
               toast(errorMessage(err), "error");
             }
           }
+        }}
+      />
+      <ConfirmModal
+        open={!!deletingComment}
+        title="Delete this comment?"
+        body="This can't be undone."
+        confirmLabel="Delete comment"
+        onClose={() => setDeletingComment(null)}
+        onConfirm={async () => {
+          const id = deletingComment;
+          setDeletingComment(null);
+          if (id) await act(() => api.delete(`${base}/comments/${id}`));
         }}
       />
     </>

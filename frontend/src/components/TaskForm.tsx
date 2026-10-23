@@ -23,7 +23,8 @@ export function TaskForm({
   onSaved: () => void;
 }) {
   const cols = sortedColumns(project);
-  const people = projectPeople(project);
+  const viewerIds = new Set(project.members.filter((m) => m.role === "viewer").map((m) => m.user._id));
+  const people = projectPeople(project).filter((p) => !viewerIds.has(p._id)); // read-only participants can't be assigned
   // `base` is the task as the form last saw it (its version is what we send back).
   const [base, setBase] = useState<Task | undefined>(task);
   const [title, setTitle] = useState(task?.title ?? "");

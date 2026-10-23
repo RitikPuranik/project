@@ -31,7 +31,7 @@ export default function Projects() {
     );
   });
 
-  const canCreate = user?.role === "admin" || user?.role === "project_manager";
+  const canCreate = user?.role === "admin";
   const rows = (data ?? []).filter(
     (r) =>
       (showArchived || !r.project.isArchived) &&

@@ -21,7 +21,7 @@ router.use(blockViewerWrites);
 router.param("id", projectAccessParam);
 router.param("projectId", projectAccessParam);
 
-router.route("/").post(authorize("admin", "project_manager"), createProject).get(getProjects);
+router.route("/").post(authorize("admin"), createProject).get(getProjects);
 router.route("/:id").get(getProject).put(updateProject).delete(deleteProject);
 router.put("/:id/archive", archiveProject);
 router.post("/:id/clone", authorize("admin", "project_manager"), cloneProject);

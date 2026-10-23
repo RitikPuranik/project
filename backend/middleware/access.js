@@ -22,7 +22,7 @@ export const getProjectRole = (user, project) => {
   const entry = project.members.find((m) => m.user.toString() === uid);
   if (!isOwner && !entry) return null;
 
-  if (user.role === "viewer") return "viewer";
+  if (user.role === "viewer" || (!isOwner && entry?.role === "viewer")) return "viewer";
   if (user.role === "project_manager" && (isOwner || entry?.role === "project_manager")) {
     return "project_manager";
   }

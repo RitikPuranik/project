@@ -121,7 +121,7 @@ export function projectRole(project: Project, user: Person | null): Role | null 
   const isOwner = project.owner?._id === user._id;
   const entry = project.members.find((m) => m.user._id === user._id);
   if (!isOwner && !entry) return null;
-  if (user.role === "viewer") return "viewer";
+  if (user.role === "viewer" || (!isOwner && entry?.role === "viewer")) return "viewer";
   if (user.role === "project_manager" && (isOwner || entry?.role === "project_manager")) return "project_manager";
   return "member";
 }
@@ -143,6 +143,13 @@ export function canWorkOnTask(project: Project, user: Person | null, task: Task)
 export function canComment(project: Project, user: Person | null): boolean {
   const r = projectRole(project, user);
   return r === "admin" || r === "project_manager" || r === "member";
+}
+
+/** Authors may delete their own comments; admins and project managers may delete any. Viewers never. */
+export function canDeleteComment(project: Project, user: Person | null, authorId: string): boolean {
+  const r = projectRole(project, user);
+  if (r === "admin" || r === "project_manager") return true;
+  return r === "member" && !!user && user._id === authorId;
 }
 
 // ---- Concurrent edits (optimistic concurrency) ---------------------------------------------

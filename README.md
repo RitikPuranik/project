@@ -1,6 +1,24 @@
 # Orbin — Project & Task Management Platform
 
-A modern, responsive full-stack project and task management system built with Express, MongoDB, React, TypeScript, and Tailwind CSS. Features role-based access control (Admin, Project Manager, Member), interactive Kanban board, customizable columns, task tracking with priorities and subtasks, activity comments, member management, project cloning, and archiving.
+A modern, responsive full-stack project and task management system built with Express, MongoDB, React, TypeScript, and Tailwind CSS. Features role-based access control (Admin, Project Manager, Member, Viewer), interactive Kanban board, customizable columns, task tracking with priorities and subtasks, activity comments, member management, project cloning, and archiving.
+
+---
+
+## ✅ What is implemented
+
+| Area | Implemented |
+|---|---|
+| **Authentication** | Registration (new accounts start as Viewer), login, JWT access + refresh tokens, logout, `GET /auth/me`, automatic token refresh in the frontend |
+| **User management** | Admin-only user creation with a chosen role, editing (name, email, role, password reset), role assignment, deactivation / reactivation (`isActive`), admin Users screen. Deactivated users are blocked at login, refresh **and on every request with an otherwise valid JWT** (`403 ACCOUNT_DEACTIVATED`) and are signed out in the UI. Guards: no self-deactivation, no self role change, the last active admin can't be removed |
+| **Roles** | Admin, Project Manager, Team Member, Viewer (global), plus a project-level Viewer role for read-only participants |
+| **Projects** | Admin-only create and delete; list, details, edit, archive/unarchive, clone, soft delete, customizable columns, dates; members add/remove; admin can assign a Project Manager at creation or from the Team tab. Every project/task read goes through a project-access check (non-participants get 403) |
+| **Project UI** | Project list with search/archive filter, creation form (with Project Manager picker), project page with Board / Tasks / Team tabs |
+| **Tasks** | Create, list (filters), read one, update, move between columns, delete, subtasks, priorities, types, due dates, labels, story points, multiple assignees. Assignees must be active, non-viewer project participants |
+| **Task permissions** | Admin/PM: everything in their projects. Team Member: only tasks assigned to them, and only description / labels / story points, status moves and subtasks. Viewer: read-only. Enforced on the server |
+| **Concurrent edits** | Optimistic concurrency via a task `version` (409 on conflict, 428 if missing) with a conflict-resolution UI |
+| **Comments** | Add, read (with the task) and delete. Authors delete their own comments; admins and project managers can delete any; Viewers and non-participants can't comment or delete. 2000-character limit. Comments section with delete (and confirmation) on the task page |
+| **Dashboard & UI** | Dashboard, Kanban board with drag-and-drop, task list, task detail page, profile, role matrix |
+| **Tests** | `cd backend && npm test` — authorization, concurrency and user-management regression tests (in-memory database fake, no MongoDB needed) |
 
 ---
 
@@ -132,14 +150,16 @@ project/
 
 | Capability | Admin | Project Manager | Team Member | Viewer |
 |---|:---:|:---:|:---:|:---:|
-| Manage Users & Roles (`/users`) | ✅ | ❌ | ❌ | ❌ |
-| Create New Projects | ✅ | ✅ | ❌ | ❌ |
-| Add Viewers as Project Members | ✅ | ✅ | ❌ | ❌ |
-| Clone & Archive Projects | ✅ | ✅ | ❌ | ❌ |
-| Manage Project Team Roster | ✅ | ✅ | ❌ | ❌ |
-| Create, Edit & Move Tasks | ✅ | ✅ | ✅ (Own projects) | ❌ |
-| Add Comments & Checklists | ✅ | ✅ | ✅ | ❌ |
-| Delete Projects & Tasks | ✅ | Project-level | ❌ | ❌ |
+| Create, edit & deactivate users, assign roles (`/users`) | ✅ | ❌ | ❌ | ❌ |
+| Create & delete projects | ✅ | ❌ | ❌ | ❌ |
+| Assign a Project Manager to a project | ✅ | ❌ | ❌ | ❌ |
+| Edit, archive & clone projects | ✅ | ✅ (assigned projects) | ❌ | ❌ |
+| Manage project team (members, project viewers) | ✅ | ✅ (assigned projects) | ❌ | ❌ |
+| Create, assign & delete tasks | ✅ | ✅ (assigned projects) | ❌ | ❌ |
+| Edit assigned tasks, change status, subtasks | ✅ | ✅ | ✅ (own assigned tasks, limited fields) | ❌ |
+| Read projects, tasks & comments | ✅ (all) | ✅ (own projects) | ✅ (own projects) | ✅ (own projects) |
+| Add comments | ✅ | ✅ | ✅ | ❌ |
+| Delete comments | ✅ (any) | ✅ (any in own projects) | ✅ (own comments) | ❌ |
 
 ### Visibility Hierarchy
 - **Admin**: Can see all users, projects, tasks, and system activities across the entire workspace.
@@ -158,14 +178,14 @@ project/
 ## 🧭 Frontend Application Routes
 
 - `/login` — User login with JWT access/refresh token exchange
-- `/register` — Account registration (first user becomes Admin)
+- `/register` — Account registration (new accounts start as Viewer; an admin grants higher roles)
 - `/dashboard` — Overview of active projects, assigned tasks, and quick actions
 - `/projects` — Project listing, creation, cloning, and archiving
 - `/projects/:id` — Interactive Kanban board with drag-and-drop column workflow
 - `/projects/:id/tasks` — Tabular task list with status, priority, and assignee filters
 - `/projects/:id/team` — Member roster and invitation management
 - `/tasks/:id` — Detailed task modal with subtasks, comments, priority, and metadata
-- `/users` — Admin-only role management dashboard
+- `/users` — Admin-only user management (create, edit, roles, deactivate)
 - `/profile` — User profile settings and session overview
 
 ---
@@ -181,13 +201,13 @@ project/
 
 ### Projects (`/api/projects`)
 - `GET /api/projects` — List all accessible projects
-- `POST /api/projects` — Create a project (Admin & PM)
+- `POST /api/projects` — Create a project (Admin only; optional `managerId`)
 - `GET /api/projects/:id` — Get project details and columns
 - `PUT /api/projects/:id` — Update project information
 - `PUT /api/projects/:id/archive` — Toggle project archive state
 - `POST /api/projects/:id/clone` — Duplicate project structure (Admin & PM)
-- `DELETE /api/projects/:id` — Delete project
-- `POST /api/projects/:id/members` — Add member to project
+- `DELETE /api/projects/:id` — Delete project (Admin only)
+- `POST /api/projects/:id/members` — Add member (`role`: `member`, `viewer`, or `project_manager` — admin only)
 - `DELETE /api/projects/:id/members/:userId` — Remove member from project
 
 ### Tasks (`/api/projects/:projectId/tasks`)
@@ -198,11 +218,15 @@ project/
 - `POST /api/projects/:projectId/tasks/:id/subtasks` — Add checklist item
 - `PUT /api/projects/:projectId/tasks/:id/subtasks/:subtaskId` — Toggle checklist item
 - `POST /api/projects/:projectId/tasks/:id/comments` — Add comment
+- `DELETE /api/projects/:projectId/tasks/:id/comments/:commentId` — Delete comment (author, or admin/PM)
 - `DELETE /api/projects/:projectId/tasks/:id` — Delete task
 
 ### Users (`/api/users`)
 - `GET /api/users?search=` — Search users by name or email
-- `PUT /api/users/:id/role` — Update user role (`admin`, `project_manager`, `member`) (Admin only)
+- `POST /api/users` — Create a user with a role (Admin only)
+- `PUT /api/users/:id` — Update name, email, role, password (Admin only)
+- `PUT /api/users/:id/role` — Update user role (Admin only)
+- `PUT /api/users/:id/deactivate` / `PUT /api/users/:id/activate` — Deactivate or reactivate an account (Admin only)
 
 ---
 

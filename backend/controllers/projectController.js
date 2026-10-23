@@ -14,21 +14,34 @@ const forbidden = (res, message) => res.status(403).json({ message });
 // @route POST /api/projects
 export const createProject = async (req, res) => {
   try {
-    const { name, description, startDate, endDate, memberIds } = req.body;
+    const { name, description, startDate, endDate, memberIds, managerId } = req.body;
     if (!name) return res.status(400).json({ message: "Project name is required" });
+
+    // Optional: assign a Project Manager at creation time (admin workflow).
+    let manager = null;
+    if (managerId) {
+      if (!mongoose.isValidObjectId(managerId)) {
+        return res.status(400).json({ message: "managerId must be a valid user id" });
+      }
+      manager = await User.findOne({ _id: managerId, isActive: { $ne: false } }).select("_id role");
+      if (!manager || manager.role !== "project_manager") {
+        return res.status(400).json({ message: "The selected manager must be an active Project Manager" });
+      }
+    }
 
     // Only real, distinct users (never the owner) can be added as members.
     const requested = [...new Set((Array.isArray(memberIds) ? memberIds : []).map(String))].filter(
-      (id) => id !== req.user._id.toString()
+      (id) => id !== req.user._id.toString() && id !== String(managerId ?? "")
     );
     if (requested.some((id) => !mongoose.isValidObjectId(id))) {
       return res.status(400).json({ message: "memberIds must be valid user ids" });
     }
-    const found = await User.find({ _id: { $in: requested } }).select("_id");
+    const found = await User.find({ _id: { $in: requested }, isActive: { $ne: false } }).select("_id");
     if (found.length !== requested.length) {
       return res.status(400).json({ message: "One or more members do not exist" });
     }
     const members = requested.map((id) => ({ user: id, role: "member" }));
+    if (manager) members.unshift({ user: manager._id, role: "project_manager" });
 
     const project = await Project.create({
       name,
@@ -110,9 +123,8 @@ export const deleteProject = async (req, res) => {
     const project = await Project.findById(req.params.id);
     if (!project || project.isDeleted) return res.status(404).json({ message: "Project not found" });
 
-    const isOwner = project.owner.toString() === req.user._id.toString();
-    if (!(req.user.role === "admin" || (isOwner && canManageProject(req.user, project)))) {
-      return forbidden(res, "Only the owner or an admin can delete this project");
+    if (req.user.role !== "admin") {
+      return forbidden(res, "Only an admin can delete a project");
     }
 
     project.isDeleted = true;
@@ -206,23 +218,38 @@ export const addMember = async (req, res) => {
       return res.status(400).json({ message: "User is already a member" });
     }
 
-    const targetUser = await User.findById(userId);
-    if (!targetUser) return res.status(404).json({ message: "User not found" });
-
-    // Project-level manager status never grants more than the user's global role allows.
-    if (role === "project_manager" && !["admin", "project_manager"].includes(targetUser.role)) {
-      return res
-        .status(400)
-        .json({ message: "Only users with the Project Manager role can be made project managers" });
+    if (role !== undefined && !["project_manager", "member", "viewer"].includes(role)) {
+      return res.status(400).json({ message: "Invalid project role" });
     }
 
-    // Project Manager can choose a Viewer to become a Member
-    if (targetUser.role === "viewer") {
+    const targetUser = await User.findById(userId);
+    if (!targetUser || targetUser.isActive === false) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    if (role === "project_manager") {
+      // Assigning a Project Manager to a project is an admin decision.
+      if (req.user.role !== "admin") {
+        return forbidden(res, "Only an admin can assign a project manager");
+      }
+      // Project-level manager status never grants more than the user's global role allows.
+      if (!["admin", "project_manager"].includes(targetUser.role)) {
+        return res
+          .status(400)
+          .json({ message: "Only users with the Project Manager role can be made project managers" });
+      }
+    }
+
+    // Adding a global Viewer as a plain member promotes them; adding as project Viewer keeps them read-only.
+    if (targetUser.role === "viewer" && role !== "viewer") {
       targetUser.role = "member";
       await targetUser.save();
     }
 
-    project.members.push({ user: userId, role: role === "project_manager" ? "project_manager" : "member" });
+    project.members.push({
+      user: userId,
+      role: ["project_manager", "viewer"].includes(role) ? role : "member",
+    });
     await project.save();
     res.json(project);
   } catch (err) {
@@ -240,6 +267,10 @@ export const removeMember = async (req, res) => {
       return forbidden(res, "Not authorized to manage members");
     }
 
+    const target = project.members.find((m) => m.user.toString() === req.params.userId);
+    if (target?.role === "project_manager" && req.user.role !== "admin") {
+      return forbidden(res, "Only an admin can remove a project manager");
+    }
     project.members = project.members.filter((m) => m.user.toString() !== req.params.userId);
     await project.save();
     res.json(project);

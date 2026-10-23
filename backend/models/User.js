@@ -12,6 +12,7 @@ const userSchema = new mongoose.Schema(
       default: "viewer",
     },
     avatar: { type: String, default: "" },
+    isActive: { type: Boolean, default: true }, // false = deactivated: cannot log in or use any token
     isVerified: { type: Boolean, default: true }, // simplified: no email verification flow wired up yet
     refreshToken: { type: String, default: null },
   },
@@ -36,6 +37,7 @@ userSchema.methods.toSafeObject = function () {
     email: this.email,
     role: this.role,
     avatar: this.avatar,
+    isActive: this.isActive !== false,
   };
 };
 

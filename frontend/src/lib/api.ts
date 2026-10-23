@@ -15,6 +15,11 @@ api.interceptors.response.use(
   (res) => res,
   async (error) => {
     const original = error.config;
+    if (error.response?.status === 403 && error.response?.data?.code === "ACCOUNT_DEACTIVATED") {
+      for (const s of [localStorage, sessionStorage]) ["accessToken", "refreshToken", "user"].forEach((k) => s.removeItem(k));
+      if (!window.location.pathname.startsWith("/login")) window.location.href = "/login";
+      return Promise.reject(error);
+    }
     if (error.response?.status === 401 && !original._retry) {
       const storage = localStorage.getItem("refreshToken") ? localStorage : sessionStorage;
       const refreshToken = storage.getItem("refreshToken");

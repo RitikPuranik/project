@@ -12,7 +12,7 @@ const columnSchema = new mongoose.Schema(
 const memberSchema = new mongoose.Schema(
   {
     user: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
-    role: { type: String, enum: ["project_manager", "member"], default: "member" },
+    role: { type: String, enum: ["project_manager", "member", "viewer"], default: "member" },
   },
   { _id: false }
 );

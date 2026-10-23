@@ -20,6 +20,12 @@ export const protect = async (req, res, next) => {
     if (!user) {
       return res.status(401).json({ message: "User no longer exists" });
     }
+    // Deactivated accounts lose access immediately, even with an otherwise valid JWT.
+    if (user.isActive === false) {
+      return res
+        .status(403)
+        .json({ message: "Your account has been deactivated", code: "ACCOUNT_DEACTIVATED" });
+    }
     req.user = user;
     next();
   } catch (err) {

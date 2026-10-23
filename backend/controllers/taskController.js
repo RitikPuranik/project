@@ -1,5 +1,6 @@
 import mongoose from "mongoose";
 import Task from "../models/Task.js";
+import User from "../models/User.js";
 import { projectParticipantIds } from "../middleware/access.js";
 
 /*
@@ -13,10 +14,13 @@ import { projectParticipantIds } from "../middleware/access.js";
  *  change status (move)        yes    yes              own assigned                   no
  *  subtasks (add / toggle)     yes    yes              own assigned                   no
  *  comment                     yes    yes              yes (tasks in their projects)  no
+ *  delete comment              any    any              own comments only              no
+ *  read comments               yes    yes              yes (tasks in their projects)  yes (their projects)
  *  delete task                 yes    yes              no                             no
  */
 const MANAGERS = ["admin", "project_manager"];
 const COMMENTERS = ["admin", "project_manager", "member"];
+const MAX_COMMENT_LENGTH = 2000;
 
 // Fields a Team Member may change on a task assigned to them. Everything else
 // (title, priority, type, due date, assignees) is manager-controlled.
@@ -96,14 +100,34 @@ const serverError = (res, message, err) => {
   res.status(clientError ? 400 : 500).json({ message, error: err.message });
 };
 
-// Assignees must be real ids of people who participate in this project.
-const parseAssignees = (project, raw) => {
+// Assignees must be real, active people who can actually do work in this project: project
+// participants who are not Viewers (global or project-level) and not deactivated. Ids that
+// are already assigned are left alone, so re-saving a task never fails because an existing
+// assignee was later deactivated or moved to a read-only role.
+const parseAssignees = async (project, raw, existing = []) => {
   if (!Array.isArray(raw)) return { error: "assignees must be an array of user ids" };
   const unique = [...new Set(raw.map(String))];
+  const already = new Set(existing.map(String));
   const allowed = new Set(projectParticipantIds(project));
+  const readOnly = new Set(project.members.filter((m) => m.role === "viewer").map((m) => m.user.toString()));
+  const added = [];
   for (const id of unique) {
     if (!mongoose.isValidObjectId(id) || !allowed.has(id)) {
       return { error: "Every assignee must be a member of this project" };
+    }
+    if (!already.has(id)) {
+      if (readOnly.has(id)) return { error: "Viewers can't be assigned tasks" };
+      added.push(id);
+    }
+  }
+  if (added.length) {
+    const eligible = await User.find({
+      _id: { $in: added },
+      role: { $ne: "viewer" },
+      isActive: { $ne: false },
+    }).select("_id");
+    if (eligible.length !== added.length) {
+      return { error: "Assignees must be active, non-viewer users" };
     }
   }
   return { ids: unique };
@@ -158,7 +182,7 @@ export const createTask = async (req, res) => {
 
     let assignees = [];
     if (req.body.assignees !== undefined) {
-      const parsed = parseAssignees(project, req.body.assignees);
+      const parsed = await parseAssignees(project, req.body.assignees);
       if (parsed.error) return res.status(400).json({ message: parsed.error });
       assignees = parsed.ids;
     }
@@ -257,7 +281,7 @@ export const updateTask = async (req, res) => {
       });
 
     if (set.assignees !== undefined) {
-      const parsed = parseAssignees(req.project, set.assignees);
+      const parsed = await parseAssignees(req.project, set.assignees, task.assignees);
       if (parsed.error) return res.status(400).json({ message: parsed.error });
       set.assignees = parsed.ids;
     }
@@ -392,6 +416,9 @@ export const addComment = async (req, res) => {
     if (typeof text !== "string" || !text.trim()) {
       return res.status(400).json({ message: "Comment text is required" });
     }
+    if (text.trim().length > MAX_COMMENT_LENGTH) {
+      return res.status(400).json({ message: `Comments are limited to ${MAX_COMMENT_LENGTH} characters` });
+    }
 
     const updated = await Task.findOneAndUpdate(
       { _id: req.task._id, isDeleted: false },
@@ -402,6 +429,37 @@ export const addComment = async (req, res) => {
     res.json(updated);
   } catch (err) {
     serverError(res, "Failed to add comment", err);
+  }
+};
+
+// @route DELETE /api/tasks/:id/comments/:commentId
+// Authors may delete their own comments; admins and project managers of the project may
+// delete any comment (moderation). Viewers never can. Atomic $pull, no version needed.
+export const deleteComment = async (req, res) => {
+  try {
+    if (!COMMENTERS.includes(req.projectRole)) {
+      return forbidden(res, "your role cannot delete comments");
+    }
+    const { commentId } = req.params;
+    if (!mongoose.isValidObjectId(commentId)) return res.status(404).json({ message: "Comment not found" });
+
+    const comment = req.task.comments.find((c) => c._id.toString() === commentId);
+    if (!comment) return res.status(404).json({ message: "Comment not found" });
+
+    const isAuthor = comment.author.toString() === req.user._id.toString();
+    if (!isAuthor && !MANAGERS.includes(req.projectRole)) {
+      return forbidden(res, "you can only delete your own comments");
+    }
+
+    const updated = await Task.findOneAndUpdate(
+      { _id: req.task._id, isDeleted: false },
+      { $pull: { comments: { _id: commentId } } },
+      { new: true }
+    ).populate("comments.author", "name avatar");
+    if (!updated) return res.status(404).json({ message: "Task not found" });
+    res.json(updated);
+  } catch (err) {
+    serverError(res, "Failed to delete comment", err);
   }
 };
 

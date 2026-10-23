@@ -39,7 +39,10 @@ export const other = mkUser("member", "other"); // member of project, not assign
 export const outsider = mkUser("member", "outsider"); // member, not in project
 export const viewer = mkUser("viewer", "viewer"); // viewer in project
 export const candidateMember = mkUser("member", "candidate"); // added through addMember
-const users = [admin, pm, pm2, pmPlain, assigned, other, outsider, viewer, candidateMember];
+export const inactive = mkUser("member", "inactive"); // deactivated member of the project
+inactive.isActive = false;
+export const projViewer = mkUser("member", "projviewer"); // global member, project-level viewer
+const users = [admin, pm, pm2, pmPlain, assigned, other, outsider, viewer, candidateMember, inactive, projViewer];
 
 export const project = new Project({
   name: "P",
@@ -49,6 +52,8 @@ export const project = new Project({
     { user: other._id, role: "member" },
     { user: viewer._id, role: "member" },
     { user: pmPlain._id, role: "member" },
+    { user: inactive._id, role: "member" },
+    { user: projViewer._id, role: "viewer" },
   ],
 });
 
@@ -96,7 +101,15 @@ const matches = (row, f) => {
 };
 
 User.findById = (id) => chain(users.find((u) => sameId(u._id, id)) ?? null);
-User.find = (q) => chain(users.filter((u) => (q._id?.$in ?? []).includes(String(u._id))));
+User.find = (q) =>
+  chain(
+    users.filter(
+      (u) =>
+        (q._id?.$in ?? []).map(String).includes(String(u._id)) &&
+        (q.role?.$ne === undefined || u.role !== q.role.$ne) &&
+        (q.isActive?.$ne === undefined || u.isActive !== q.isActive.$ne)
+    )
+  );
 User.findOne = () => chain(null);
 User.create = async (d) => {
   const u = mkUser(d.role, d.name);
@@ -148,6 +161,9 @@ Task.findOneAndUpdate = (filter, update, opts = {}) =>
       }
       for (const [k, v] of Object.entries(update.$inc ?? {})) next[k] = (next[k] ?? 0) + v;
       for (const [k, v] of Object.entries(update.$push ?? {})) next[k] = [...next[k], v];
+      for (const [k, v] of Object.entries(update.$pull ?? {})) {
+        next[k] = next[k].filter((el) => !Object.entries(v).every(([f, val]) => sameId(el[f], val)));
+      }
       const doc = new Task(next); // casts values like Mongoose does for updates
       if (opts.runValidators) await doc.validate();
       rows[i] = { ...doc.toObject(), updatedAt: new Date() };
@@ -185,3 +201,4 @@ export const call = async (user, method, path, body) => {
 export const P = () => `/projects/${project._id}`;
 export const T = () => `${P()}/tasks/${rows[0]._id}`;
 export const subtaskId = (i = 0) => rows[0].subtasks[i]._id;
+export const commentIds = () => rows[0].comments.map((c) => String(c._id));

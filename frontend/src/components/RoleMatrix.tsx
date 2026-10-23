@@ -12,10 +12,10 @@ const ROWS: { label: string; values: Record<Role, Cell> }[] = [
   { label: "Edit task details", values: { admin: true, project_manager: "Own projects", member: "Assigned to you, limited fields", viewer: false } },
   { label: "Change task status and subtasks", values: { admin: true, project_manager: "Own projects", member: "Assigned to you", viewer: false } },
   { label: "Comment on tasks", values: { admin: true, project_manager: true, member: "Own projects", viewer: false } },
-  { label: "Create projects", values: { admin: true, project_manager: true, member: false, viewer: false } },
+  { label: "Create projects and assign project managers", values: { admin: true, project_manager: false, member: false, viewer: false } },
   { label: "Edit, archive and manage project teams", values: { admin: true, project_manager: "Own projects", member: false, viewer: false } },
-  { label: "Delete projects", values: { admin: true, project_manager: "Own projects", member: false, viewer: false } },
-  { label: "Change user roles", values: { admin: true, project_manager: false, member: false, viewer: false } },
+  { label: "Delete projects", values: { admin: true, project_manager: false, member: false, viewer: false } },
+  { label: "Create, edit and deactivate users", values: { admin: true, project_manager: false, member: false, viewer: false } },
 ];
 
 function Mark({ v }: { v: Cell }) {

@@ -48,6 +48,11 @@ export const login = async (req, res) => {
     if (!user || !(await user.matchPassword(password))) {
       return res.status(401).json({ message: "Invalid email or password" });
     }
+    if (user.isActive === false) {
+      return res
+        .status(403)
+        .json({ message: "Your account has been deactivated", code: "ACCOUNT_DEACTIVATED" });
+    }
 
     const accessToken = generateAccessToken(user._id, user.role);
     const refreshToken = generateRefreshToken(user._id);
@@ -79,6 +84,11 @@ export const refresh = async (req, res) => {
 
     if (!user || user.refreshToken !== refreshToken) {
       return res.status(401).json({ message: "Invalid refresh token" });
+    }
+    if (user.isActive === false) {
+      return res
+        .status(403)
+        .json({ message: "Your account has been deactivated", code: "ACCOUNT_DEACTIVATED" });
     }
 
     const accessToken = generateAccessToken(user._id, user.role);

@@ -30,7 +30,7 @@ export default function ProjectLayout() {
 
   const canManage = canManageProject(project, user);
   const canClone = user?.role === "admin" || user?.role === "project_manager";
-  const canDelete = user?.role === "admin" || (user?.role !== "viewer" && project.owner._id === user?._id);
+  const canDelete = user?.role === "admin";
 
   async function run(fn: () => Promise<unknown>, ok: string) {
     try {

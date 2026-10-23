@@ -3,7 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   setup, call, P, T, freshTask, stored, storedVersion as ver, subtaskId,
-  admin, pm, pm2, pmPlain, assigned, other, outsider, viewer, candidateMember,
+  admin, pm, pm2, pmPlain, assigned, other, outsider, viewer, candidateMember, inactive, projViewer, commentIds,
 } from "./helpers.mjs";
 
 setup();
@@ -144,7 +144,8 @@ test("project management: members of a project can't manage it; PM can't mint ma
   await expectStatus(call(assigned, "PUT", P(), { name: "x" }), 403);
   await expectStatus(call(assigned, "DELETE", P()), 403);
   await expectStatus(call(assigned, "POST", `${P()}/members`, { userId: String(candidateMember._id) }), 403);
-  await expectStatus(call(pm, "POST", `${P()}/members`, { userId: String(candidateMember._id), role: "project_manager" }), 400, "global member can't become project manager");
+  await expectStatus(call(pm, "POST", `${P()}/members`, { userId: String(candidateMember._id), role: "project_manager" }), 403, "PM can't assign project managers");
+  await expectStatus(call(admin, "POST", `${P()}/members`, { userId: String(candidateMember._id), role: "project_manager" }), 400, "global member can't become project manager");
   await expectStatus(call(pm, "POST", `${P()}/members`, { userId: "not-an-id" }), 400);
   await expectStatus(call(pm, "POST", `${P()}/members`, { userId: String(candidateMember._id) }), 200, "PM adds member");
 });
@@ -155,4 +156,39 @@ test("registration ignores a requested role", async () => {
     assert.equal(r.status, 201);
     assert.equal(r.body.user.role, "viewer");
   }
+});
+
+test("project-level viewer is read-only; viewers and deactivated users can't be assigned", async () => {
+  freshTask();
+  await expectStatus(call(projViewer, "GET", T()), 200);
+  await expectStatus(call(projViewer, "POST", `${T()}/comments`, { text: "hi" }), 403, "comment");
+  await expectStatus(call(projViewer, "PUT", T(), { description: "x", version: ver() }), 403, "update");
+  await expectStatus(call(projViewer, "PUT", `${T()}/move`, { columnId: "done", order: 1, version: ver() }), 403, "move");
+  await expectStatus(call(pm, "POST", `${P()}/tasks`, { title: "x", assignees: [String(projViewer._id)] }), 400, "project viewer assignee");
+  await expectStatus(call(pm, "POST", `${P()}/tasks`, { title: "x", assignees: [String(viewer._id)] }), 400, "global viewer assignee");
+  await expectStatus(call(pm, "POST", `${P()}/tasks`, { title: "x", assignees: [String(inactive._id)] }), 400, "deactivated assignee");
+  await expectStatus(call(pm, "PUT", T(), { assignees: [String(inactive._id)], version: ver() }), 400, "assign deactivated on update");
+});
+
+test("comments: participants read, commenters add, authors delete own, managers moderate, viewers/outsiders blocked", async () => {
+  freshTask();
+  await expectStatus(call(viewer, "GET", T()), 200, "viewer reads comments");
+  await expectStatus(call(outsider, "GET", T()), 403, "outsider can't read");
+  await expectStatus(call(assigned, "POST", `${T()}/comments`, { text: "a" }), 200);
+  await expectStatus(call(other, "POST", `${T()}/comments`, { text: "b" }), 200);
+  await expectStatus(call(pm, "POST", `${T()}/comments`, { text: "c" }), 200);
+  await expectStatus(call(assigned, "POST", `${T()}/comments`, { text: "   " }), 400, "blank");
+  await expectStatus(call(assigned, "POST", `${T()}/comments`, { text: "x".repeat(2001) }), 400, "too long");
+  const [a, b, c] = commentIds();
+  const del = (u, id) => call(u, "DELETE", `${T()}/comments/${id}`);
+
+  await expectStatus(del(viewer, a), 403, "viewer");
+  await expectStatus(del(outsider, a), 403, "outsider");
+  await expectStatus(del(other, a), 403, "member deleting someone else's comment");
+  await expectStatus(del(assigned, "not-an-id"), 404);
+  await expectStatus(del(assigned, a), 200, "author deletes own");
+  await expectStatus(del(assigned, a), 404, "already gone");
+  await expectStatus(del(pm, b), 200, "PM moderates");
+  await expectStatus(del(admin, c), 200, "admin moderates");
+  assert.equal(commentIds().length, 0);
 });

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import api from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 import { errorMessage } from "@/lib/format";
 import { useProject } from "@/lib/projectContext";
 import type { Person } from "@/lib/types";
@@ -8,9 +9,11 @@ import { Avatar, Button, Input, RoleBadge, Select, useToast } from "@/components
 export default function Team() {
   const { project, reload, canManage } = useProject();
   const toast = useToast();
+  const { user } = useAuth();
+  const isAdmin = user?.role === "admin";
   const [q, setQ] = useState("");
   const [results, setResults] = useState<Person[]>([]);
-  const [role, setRole] = useState<"member" | "project_manager">("member");
+  const [role, setRole] = useState<"member" | "project_manager" | "viewer">("member");
   const memberIds = new Set([project.owner._id, ...project.members.map((m) => m.user._id)]);
 
   useEffect(() => {
@@ -75,7 +78,7 @@ export default function Team() {
                 <p className="truncate text-xs text-muted">{m.user.email}</p>
               </div>
               <RoleBadge role={m.role} />
-              {canManage && <Button size="sm" variant="ghost" onClick={() => remove(m.user)}>Remove</Button>}
+              {canManage && (isAdmin || m.role !== "project_manager") && <Button size="sm" variant="ghost" onClick={() => remove(m.user)}>Remove</Button>}
             </li>
           ))}
         </ul>
@@ -88,7 +91,8 @@ export default function Team() {
             <Input type="search" aria-label="Search people" placeholder="Search by name or email" value={q} onChange={(e) => setQ(e.target.value)} />
             <Select aria-label="Role in this project" value={role} onChange={(e) => setRole(e.target.value as typeof role)}>
               <option value="member">Member</option>
-              <option value="project_manager">Project manager</option>
+              <option value="viewer">Viewer (read-only)</option>
+              {isAdmin && <option value="project_manager">Project manager</option>}
             </Select>
           </div>
           <ul className="mt-3 flex flex-col">

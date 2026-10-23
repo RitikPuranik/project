@@ -9,6 +9,7 @@ import {
   addSubtask,
   toggleSubtask,
   addComment,
+  deleteComment,
 } from "../controllers/taskController.js";
 import { protect, blockViewerWrites } from "../middleware/auth.js";
 import { taskAccessParam } from "../middleware/access.js";
@@ -25,5 +26,6 @@ router.put("/:id/move", moveTask);
 router.post("/:id/subtasks", addSubtask);
 router.put("/:id/subtasks/:subtaskId", toggleSubtask);
 router.post("/:id/comments", addComment);
+router.delete("/:id/comments/:commentId", deleteComment);
 
 export default router;
